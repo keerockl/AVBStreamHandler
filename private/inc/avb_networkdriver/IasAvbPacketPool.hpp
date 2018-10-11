@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2018 Intel Corporation. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ @COPYRIGHT_TAG@
  */
 /**
  * @file    IasAvbPacketPool.hpp
@@ -14,8 +12,8 @@
 #define IASAVBPACKETPOOL_HPP_
 
 #include "IasAvbPacket.hpp"
-#include "IasAvbTypes.hpp"
-#include "IasAvbStreamHandlerEnvironment.hpp"
+#include "avb_streamhandler/IasAvbTypes.hpp"
+#include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include <vector>
 #include <linux/if_ether.h>
 #include <mutex>
@@ -39,14 +37,13 @@ class IasAvbPacketPool
     explicit IasAvbPacketPool(DltContext &dltContext);
 
     /**
-     *  @brief Destructor, non-virtual as we don't have any virtual methods and do not belong to a class hierarchy.
+     *  @brief Destructor, virtual by default.
      */
-    /*non-virtual*/
-    ~IasAvbPacketPool();
+    virtual ~IasAvbPacketPool();
 
     // Operations
 
-    IasAvbProcessingResult init(size_t packetSize, uint32_t poolSize);
+    IasAvbProcessingResult init(size_t packetSize, uint32_t poolSize, IasAvbStreamDirection direction = IasAvbStreamDirection::eIasAvbTransmitToNetwork);
     void cleanup();
     IasAvbPacket* getPacket();
     inline IasAvbPacket* getDummyPacket();
@@ -55,7 +52,16 @@ class IasAvbPacketPool
     static IasAvbProcessingResult returnPacket(IasAvbPacket* packet);
     inline size_t getPacketSize() const;
     inline uint32_t getPoolSize() const;
+    inline IasAvbPacket* getPoolBase() const;
     IasAvbProcessingResult reset();
+
+  protected:
+    virtual IasAvbProcessingResult derivedInit();
+    virtual void derivedCleanup();
+
+    inline IasAvbStreamDirection getDirection() const;
+
+    DltContext *mLog;
 
   private:
     /**
@@ -70,31 +76,24 @@ class IasAvbPacketPool
 
   private:
     // Local Types
-    typedef igb_dma_alloc Page;
     typedef std::vector<IasAvbPacket*> PacketStack;
-    typedef std::vector<Page*> PageList;
 
     // Constants
 
     static const uint32_t cMaxPoolSize = 2048u;                // derived from max TX ring size / 2
-#if defined(DIRECT_RX_DMA)
     static const size_t cMaxBufferSize = 2048u;              // fixed value by libigb
-#else
-    static const size_t cMaxBufferSize = ETH_FRAME_LEN + 4u; // consider VLAN TAG
-#endif /* DIRECT_RX_DMA */
 
     // helpers
-    IasAvbProcessingResult initPage(Page * page, const uint32_t packetsPerPage, uint32_t & packetCountTotal);
     IasAvbProcessingResult doReturnPacket(IasAvbPacket* packet);
+    void doCleanup();
 
     // Members
-    DltContext *mLog;
     std::mutex mLock;
     size_t mPacketSize;
     uint32_t mPoolSize;
     PacketStack mFreeBufferStack;
     IasAvbPacket* mBase;
-    PageList mDmaPages;
+    IasAvbStreamDirection mDirection;
 };
 
 
@@ -124,6 +123,16 @@ inline IasAvbPacket* IasAvbPacketPool::getDummyPacket()
   }
 
   return ret;
+}
+
+inline IasAvbPacket* IasAvbPacketPool::getPoolBase() const
+{
+  return mBase;
+}
+
+inline IasAvbStreamDirection IasAvbPacketPool::getDirection() const
+{
+  return mDirection;
 }
 
 

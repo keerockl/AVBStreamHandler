@@ -30,6 +30,7 @@ namespace IasMediaTransportAvb {
 class IasAvbPacket;
 class IasAvbPacketPool;
 class IasAvbClockDomain;
+class IasAvbNetworkDriver;
 
 class IasAvbStream
 {
@@ -142,6 +143,7 @@ class IasAvbStream
     uint16_t                  mVlanData;
     uint32_t                  mPresentationTimeOffset;
     bool                    mPreconfigured;
+    IasAvbNetworkDriver    *mNetworkDriver;
 };
 
 

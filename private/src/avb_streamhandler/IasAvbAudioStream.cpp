@@ -11,7 +11,7 @@
 
 #include "avb_streamhandler/IasAvbAudioStream.hpp"
 #include "avb_streamhandler/IasLocalAudioStream.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include "avb_streamhandler/IasAvbRxStreamClockDomain.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
@@ -149,6 +149,7 @@ IasAvbAudioStream::IasAvbAudioStream()
   , mFirstRun(true)
   , mBTMEnable(false)
   , mMasterTimeUpdateMinInterval(0u)
+  , mVlanOffloadEnable(false)
 {
   // do nothing
 }
@@ -261,8 +262,8 @@ IasAvbProcessingResult IasAvbAudioStream::initTransmit(IasAvbSrClass srClass, ui
       {
         mSamplesPerChannelPerPacket = uint16_t((sampleFreq + (packetsPerSec - 1u)) / packetsPerSec);
 #if DEBUG_LAUNCHTIME
-        IasAvbTSpec tSpec(getPacketSize(format, uint16_t(maxNumberChannels * mSamplesPerChannelPerPacket)) + 8,
-            IasAvbTSpec::eIasAvbClassA);
+        IasAvbTSpec tSpec(static_cast<uint16_t>(getPacketSize(format, uint16_t(maxNumberChannels * mSamplesPerChannelPerPacket)) + 8u),
+            srClass);
 #else
         IasAvbTSpec tSpec(getPacketSize(format, uint16_t(maxNumberChannels * mSamplesPerChannelPerPacket)),
             srClass);
@@ -327,6 +328,13 @@ IasAvbProcessingResult IasAvbAudioStream::initTransmit(IasAvbSrClass srClass, ui
 
     if (eIasAvbProcOK == result)
     {
+      std::string nwIfType = "";
+      (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cNwIfType, nwIfType);
+      if ("socket" == nwIfType)
+      {
+        mVlanOffloadEnable = true;
+      }
+
       uint32_t val = 0x7FFFu; // format specific
       if (IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cAudioFloatGain, val))
       {
@@ -529,10 +537,13 @@ IasAvbProcessingResult IasAvbAudioStream::prepareAllPackets()
     packetData += cIasAvbMacAddressLength;
 
     // VLAN tag
-    *(packetData++) = 0x81u;
-    *(packetData++) = 0x00u;
-    *(packetData++) = uint8_t(getVlanData() >> 8);
-    *(packetData++) = uint8_t(getVlanData());
+    if (!mVlanOffloadEnable)
+    {
+      *(packetData++) = 0x81u;
+      *(packetData++) = 0x00u;
+      *(packetData++) = uint8_t(getVlanData() >> 8);
+      *(packetData++) = uint8_t(getVlanData());
+    }
 
     /* 1722 header update + payload */
     *(packetData++) = 0x22u; // 1722 Ethtype high
@@ -766,7 +777,13 @@ bool IasAvbAudioStream::writeToAvbPacket(IasAvbPacket* packet, uint64_t nextWind
   {
     AVB_ASSERT(NULL != packet);
     AVB_ASSERT(NULL != packet->getBasePtr());
-    uint8_t* const avtpBase8 = static_cast<uint8_t*>(packet->getBasePtr()) + ETH_HLEN + 4u; // consider VLAN tag
+    uint8_t* avtpBase8 = static_cast<uint8_t*>(packet->getBasePtr()) + ETH_HLEN + 4u; // consider VLAN tag
+
+    if (mVlanOffloadEnable)
+    {
+      avtpBase8 -= 4u;
+    }
+
     uint16_t* const avtpBase16 = reinterpret_cast<uint16_t*>(avtpBase8);
     uint32_t* const avtpBase32 = reinterpret_cast<uint32_t*>(avtpBase8);
     uint16_t numChannels = 0u;
@@ -1075,7 +1092,14 @@ bool IasAvbAudioStream::writeToAvbPacket(IasAvbPacket* packet, uint64_t nextWind
         IasAvbTSpec::cIasAvbPerFrameOverhead;
 #if DEBUG_LAUNCHTIME
     (void) memcpy(avtpBase8 + IasAvbAudioFormatTraits<IasAvbAudioFormat::eIasAvbAudioFormatSaf16>::cHeaderSize + streamDataLength, &mPacketLaunchTime, 8);
-    packet->len += 8;
+    if (mVlanOffloadEnable)
+    {
+      packet->len += 4;
+    }
+    else
+    {
+      packet->len += 8;
+    }
 #endif
     bool btmEnable = false;
     (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cBootTimeMeasurement, btmEnable);

@@ -17,18 +17,18 @@
 #include "avb_streamhandler/IasAlsaVirtualDeviceStream.hpp"
 #include "avb_streamhandler/IasAvbStreamHandler.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamId.hpp"
 #include "avb_streamhandler/IasAvbPtpClockDomain.hpp"
 #include "avb_streamhandler/IasAvbRxStreamClockDomain.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
 #undef protected
 #undef private
 
 #include "test_common/IasSpringVilleInfo.hpp"
 #include "test_common/IasAvbConfigurationInfo.hpp"
 
-#include "avb_streamhandler/IasAvbPacketPool.hpp" // For heap fail size calculations
+#include "avb_networkdriver/IasAvbPacketPool.hpp" // For heap fail size calculations
 extern size_t heapSpaceLeft;
 extern size_t heapSpaceInitSize;
 

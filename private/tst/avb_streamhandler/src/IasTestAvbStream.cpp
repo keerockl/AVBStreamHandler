@@ -14,7 +14,7 @@
 #define private public
 #define protected public
 #include "avb_streamhandler/IasAvbStream.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandler.hpp"
 #undef protected
 #undef private

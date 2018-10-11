@@ -12,6 +12,7 @@
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include "avb_streamhandler/IasDiaLogger.hpp"
+#include "avb_networkdriver/IasAvbNetworkDriver.hpp"
 
 #include <unistd.h>
 #include <sys/mman.h>   // For shared memory mapping
@@ -75,7 +76,6 @@ IasLibPtpDaemon::IasLibPtpDaemon(std::string const &sharedMemoryName, uint32_t c
   , mLastTimeMutex()
   , mProcessId(0)
   , mLog(&IasAvbStreamHandlerEnvironment::getDltContext("_PTP"))
-  , mIgbDevice(NULL)
   , mLocalTimeUpdating(false)
   , mMaxCrossTimestampSamples(cMaxCrossTimestampSamples)
   , mSysTimeMeasurementThreshold(cSysTimeMeasurementThreshold)
@@ -181,13 +181,6 @@ IasAvbProcessingResult IasLibPtpDaemon::init()
 
     if (eIasAvbProcOK == result)
     {
-      /*
-       * mIgbDevice might be NULL for some unit test cases. IasLibPtpDaemon will run
-       * in a fallback mode by using generic clock_gettime() instead of libigb API in
-       * those cases.
-       */
-      mIgbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
-
       // initialize cross-timestamp parameters before getting initial cross-timestamp in calculateConversionCoeffs()
       IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cPtpXtstampThresh, mSysTimeMeasurementThreshold);
       IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cPtpXtstampLoopCount, mMaxCrossTimestampSamples);
@@ -251,6 +244,15 @@ IasAvbProcessingResult IasLibPtpDaemon::init()
       if (eIasAvbProcOK == result)
       {
         result = calculateConversionCoeffs();
+      }
+    }
+
+    if (eIasAvbProcOK == result)
+    {
+      mNetworkDriver = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+      if (NULL == mNetworkDriver)
+      {
+        result = eIasAvbProcErr;
       }
     }
 
@@ -352,7 +354,9 @@ IasAvbProcessingResult IasLibPtpDaemon::calculateConversionCoeffs()
         const uint64_t cRawInitXtstampMaxTrial = (eRawXtstampImplRev2 == mRawXtstampEn) ? (std::numeric_limits<uint64_t>::max()) : (10);
         for (uint64_t i = 0; i < cRawInitXtstampMaxTrial; i++)
         {
-          if (getIgbTime(mLastLocalTimeforRaw, mLastRaw, cRawClockId) == eIasAvbProcOK)
+          ret = mNetworkDriver->getPtpToClockX(mLastLocalTimeforRaw, mLastRaw, cRawClockId,
+                                               mMaxCrossTimestampSamples, mRawToLocalTstampThreshold);
+          if (eIasAvbProcOK == ret)
           {
             break;
           }
@@ -370,6 +374,7 @@ IasAvbProcessingResult IasLibPtpDaemon::calculateConversionCoeffs()
             raw2 = getRaw();
             mLastRaw = (raw1 >> 1) + (raw2 >> 1);
             mLastLocalTimeforRaw = convertTimespecToNs(tp);
+            ret = eIasAvbProcOK;
           }
         }
         mRawToLocalFactors.clear();
@@ -601,7 +606,10 @@ uint64_t IasLibPtpDaemon::getRealLocalTime(const bool force)
   {
     if (mClockId != -1)
     {
-      if (eIasAvbProcOK != getIgbTime(lt, tsc1, cSysClockId))
+      ret = mNetworkDriver->getPtpToClockX(lt, tsc1, cSysClockId,
+                                           mMaxCrossTimestampSamples, mSysTimeMeasurementThreshold);
+
+      if (eIasAvbProcOK != ret)
       {
         // get ptp time with clock_gettime() as a fallback
         struct timespec tp;
@@ -700,7 +708,9 @@ uint64_t IasLibPtpDaemon::getRealLocalTime(const bool force)
     if (mRawXtstampEn)
     {
       // raw specific code
-      if (eIasAvbProcOK != getIgbTime(localTimeForRaw, raw1, cRawClockId))
+      ret = mNetworkDriver->getPtpToClockX(localTimeForRaw, raw1, cRawClockId,
+                                           mMaxCrossTimestampSamples, mRawToLocalTstampThreshold);
+      if (eIasAvbProcOK != ret)
       {
         // fall-back for only init phase
         struct timespec tp;
@@ -757,7 +767,10 @@ uint64_t IasLibPtpDaemon::getRealLocalTime(const bool force)
     if (mRawXtstampEn)
     {
       // raw specific code
-      if (eIasAvbProcOK != getIgbTime(localTimeForRaw, raw1, cRawClockId))
+      ret = mNetworkDriver->getPtpToClockX(localTimeForRaw, raw1, cRawClockId,
+                                           mMaxCrossTimestampSamples, mRawToLocalTstampThreshold);
+
+      if (eIasAvbProcOK != ret)
       {
         // unable to get precision cross time-stamps, free wheel with current factors
       }
@@ -911,116 +924,6 @@ uint64_t IasLibPtpDaemon::getRealLocalTime(const bool force)
   (void) mLastTimeMutex.unlock();
 
   return ret;
-}
-
-IasAvbProcessingResult IasLibPtpDaemon::getIgbTime(uint64_t &ptpTime, uint64_t &sysTime, const clockid_t clockId)
-{
-  IasAvbProcessingResult result = eIasAvbProcOK;
-
-  uint64_t sysTimeMeasurementInterval = 0u;
-  uint64_t sysTimeMeasurementIntervalMin = std::numeric_limits<uint64_t>::max();
-  const uint64_t cXtstampThreshold = (cSysClockId == clockId) ? mSysTimeMeasurementThreshold : mRawToLocalTstampThreshold;
-
-  ptpTime = 0u;
-  sysTime = 0u;
-
-  for (uint64_t i = 0u; i < mMaxCrossTimestampSamples; i++)
-  {
-    /*
-     * The value of cMaxCrossTimestampSamples is 3 by default.
-     *
-     * This method gets the ptp/monotonic cross-timestamp maximum 3 times then returns the most accurate one.
-     * More iteration could provide higher accuracy. But since it has to lock the IGB device to access the registers
-     * and the lock might block the TX sequencer which calls igb_xmit(), the number of iteration should be limited.
-     *
-     * It took one third cpu time to read the I210 clock from the registers compared to the general approach
-     * using the clock_gettime(). Then we may do the iteration at least 3 times to get better accuracy without
-     * increasing cpu load. (approx time needed on MRB: direct register access 3 us, clock_gettime 10 us)
-     */
-
-    if ((NULL == mIgbDevice) || (0 != igb_lock(mIgbDevice)) ||
-        ((cSysClockId != clockId) && (cRawClockId != clockId)) )
-    {
-      result = eIasAvbProcErr;
-      break;
-    }
-    else
-    {
-      uint64_t sys1 = 0u;
-      uint64_t sys2 = 0u;
-
-      uint32_t tsauxcReg = 0u;
-      uint32_t stmph0Reg = 0u;
-      uint32_t stmpl0Reg = 0u;
-
-      (void) igb_readreg(mIgbDevice, TSAUXC, &tsauxcReg);
-      tsauxcReg |= TSAUXC_SAMP_AUTO;
-
-      // clear the value stored in AUXSTMPH/L0
-      (void) igb_readreg(mIgbDevice, AUXSTMPH0, &stmph0Reg);
-
-      sys1 = (cSysClockId == clockId) ? getTsc() : getRaw();
-
-      // set the SAMP_AUT0 flag to latch the SYSTIML/H registers
-      (void) igb_writereg(mIgbDevice, TSAUXC, tsauxcReg);
-
-      // memory fence to avoid reading the registers before writing the SAMP_AUT0 flag
-      __asm__ __volatile__("mfence;"
-                  :
-                  :
-                  : "memory");
-
-      sys2 = (cSysClockId == clockId) ? getTsc() : getRaw();
-
-      // read the stored values
-      (void) igb_readreg(mIgbDevice, AUXSTMPH0, &stmph0Reg);
-      (void) igb_readreg(mIgbDevice, AUXSTMPL0, &stmpl0Reg);
-
-      (void) igb_unlock(mIgbDevice);
-
-      sysTimeMeasurementInterval = sys2 - sys1;
-      if (sysTimeMeasurementInterval < sysTimeMeasurementIntervalMin)
-      {
-        sysTime = (sys1 >> 1) + (sys2 >> 1);
-        ptpTime = stmph0Reg * uint64_t(1000000000u) + stmpl0Reg;
-        sysTimeMeasurementIntervalMin = sysTimeMeasurementInterval;
-
-        if (sysTimeMeasurementIntervalMin <= cXtstampThreshold)
-        {
-          // immediately exit the loop once we get cross-timestamp with the target accuracy
-          break;
-        }
-      }
-    }
-  }
-
-  if (cRawClockId == clockId)
-  {
-    mDiag.rawXCount++;
-    if (cXtstampThreshold < sysTimeMeasurementIntervalMin)
-    {
-      mDiag.rawXFail++;
-      result = eIasAvbProcErr;
-    }
-
-    // statistics for analysis
-    if (mDiag.rawXMaxInt < sysTimeMeasurementInterval)
-    {
-      mDiag.rawXMaxInt = sysTimeMeasurementInterval;
-    }
-    if ((0u == mDiag.rawXMinInt) || (sysTimeMeasurementInterval < mDiag.rawXMinInt))
-    {
-      mDiag.rawXMinInt = sysTimeMeasurementInterval;
-    }
-    mDiag.rawXTotalInt += sysTimeMeasurementInterval;
-
-    const double rawXSuccessRate = double(mDiag.rawXCount - mDiag.rawXFail)/double(mDiag.rawXCount);
-    const double rawXAvgInterval = double(mDiag.rawXTotalInt) / double(mDiag.rawXCount);
-    DLT_LOG_CXX(*mLog, DLT_LOG_DEBUG, LOG_PREFIX, "raw-x-tstamp diag: success rate avg =",
-                rawXSuccessRate, "interval avg =", rawXAvgInterval, "max =", mDiag.rawXMaxInt, "min =", mDiag.rawXMinInt);
-  }
-
-  return result;
 }
 
 IasAvbProcessingResult IasLibPtpDaemon::detectTscFreq(void)

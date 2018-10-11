@@ -17,7 +17,7 @@
 
 
 #include "avb_streamhandler/IasAvbTypes.hpp"
-#include "IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include <cstring>
 
 namespace IasMediaTransportAvb {

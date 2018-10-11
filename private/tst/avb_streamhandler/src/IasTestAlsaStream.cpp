@@ -113,12 +113,9 @@ protected:
         {
           if (eIasAvbProcOK == mEnvironment->createIgbDevice())
           {
-            if (IasAvbStreamHandlerEnvironment::getIgbDevice())
+            if (eIasAvbProcOK == mEnvironment->createPtpProxy())
             {
-              if (eIasAvbProcOK == mEnvironment->createPtpProxy())
-              {
-                return true;
-              }
+              return true;
             }
           }
         }

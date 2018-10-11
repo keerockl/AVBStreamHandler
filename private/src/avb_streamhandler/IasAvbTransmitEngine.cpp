@@ -14,8 +14,9 @@
 #include "avb_streamhandler/IasAvbAudioStream.hpp"
 #include "avb_streamhandler/IasAvbVideoStream.hpp"
 #include "avb_streamhandler/IasAvbClockReferenceStream.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbNetworkDriver.hpp"
 #include "avb_streamhandler/IasAvbTransmitSequencer.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEventInterface.hpp"
@@ -44,8 +45,7 @@ static const std::string cClassName = "IasAvbTransmitEngine::";
  *  Constructor.
  */
 IasAvbTransmitEngine::IasAvbTransmitEngine()
-  : mIgbDevice(NULL)
-  , mAvbStreams()
+  : mAvbStreams()
   , mUseShaper(false)
   , mUseResume(false)
   , mRunning(false)
@@ -53,6 +53,7 @@ IasAvbTransmitEngine::IasAvbTransmitEngine()
   , mEventInterface(NULL)
   , mLog(&IasAvbStreamHandlerEnvironment::getDltContext("_TXE"))
   , mBTMEnable(false)
+  , mNetworkDriver(NULL)
 {
   DLT_LOG_CXX(*mLog, DLT_LOG_VERBOSE, LOG_PREFIX);
 }
@@ -81,13 +82,13 @@ IasAvbProcessingResult IasAvbTransmitEngine::init()
     result = eIasAvbProcInitializationFailed;
   }
 
-  mIgbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
-  if (NULL == mIgbDevice)
+  mNetworkDriver = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+  if (NULL == mNetworkDriver)
   {
     /**
      * @log Init failed: Returned igbDevice == NULL
      */
-    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "mIgbDevice == NULL!");
+    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "mNetworkDriver == NULL!");
     result = eIasAvbProcInitializationFailed;
   }
 
@@ -96,31 +97,6 @@ IasAvbProcessingResult IasAvbTransmitEngine::init()
     uint64_t val = 0u;
     (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cXmitUseShaper, val);
     mUseShaper = (0u != val);
-
-    int32_t err = -1;
-    uint32_t errCount = 0u;
-    uint32_t timeoutCnt  = 0u;
-    (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cIgbAccessTimeoutCnt, timeoutCnt);
-
-    // Retry until igb_avb is ready.
-    while ((0 != err) && (timeoutCnt > errCount))
-    {
-      err = igb_set_class_bandwidth( mIgbDevice, 0u, 0u, 1500u, 64u ); /* Qav disabled*/
-      if (0u != err)
-      {
-        ::usleep(cIgbAccessSleep);
-        errCount ++;
-      }
-      else
-      {
-        if (0u != errCount)
-        {
-          DLT_LOG_CXX(*mLog, DLT_LOG_WARN, LOG_PREFIX, "Couldn't configure shaper!(",
-              strerror(err), " error count:", (errCount), ")");
-          // do not abort, try running without config
-        }
-      }
-    }
   }
 
   // this should actually be redundant
@@ -157,7 +133,7 @@ void IasAvbTransmitEngine::cleanup()
     delete s;
   }
 
-  mIgbDevice = NULL;
+  mNetworkDriver = NULL;
   mAvbStreams.clear();
 }
 
@@ -252,18 +228,17 @@ void IasAvbTransmitEngine::updateLinkStatus(const bool linkIsUp)
     }
     else
     {
-      if (mIgbDevice)
+      if (mNetworkDriver)
       {
-        const int32_t err = igb_set_class_bandwidth( mIgbDevice, 0u, 0u, 1500u, 64u ); /* Qav disabled*/
-        if (err < 0)
+        IasAvbProcessingResult ret = mNetworkDriver->setShaperMode(false); /* Qav disabled*/
+        if (ret)
         {
-            DLT_LOG_CXX(*mLog, DLT_LOG_WARN, LOG_PREFIX, "Couldn't configure shaper: ",
-                strerror(err));
+          DLT_LOG_CXX(*mLog, DLT_LOG_WARN, LOG_PREFIX, "Couldn't configure shaper: ", uint32_t(ret));
         }
       }
       else
       {
-        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "mIgbDevice == NULL!");
+        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "mNetworkDriver == NULL!");
       }
     }
   }
@@ -300,19 +275,19 @@ IasAvbProcessingResult IasAvbTransmitEngine::start()
   {
     if (mUseResume)
     {
-      if (mIgbDevice)
+      if (mNetworkDriver)
       {
-        int32_t err = -1;
+        IasAvbProcessingResult err = eIasAvbProcErr;
         uint32_t errCount = 0u;
         uint32_t timeoutCnt = 0u;
 
         (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cIgbAccessTimeoutCnt, timeoutCnt);
         // Retry until igb_avb is ready.
-        err = -1;
-        while ((0 != err) && (timeoutCnt > errCount))
+        while ((eIasAvbProcOK != err) && (timeoutCnt > errCount))
         {
-          err = igb_set_class_bandwidth( mIgbDevice, 0u, 0u, 1500u, 64u ); /* Qav disabled*/
-          if (0u != err)
+          err = mNetworkDriver->setShaperMode(false); /* Qav disabled*/
+
+          if (eIasAvbProcOK != err)
           {
             ::usleep(cIgbAccessSleep);
             errCount ++;
@@ -322,7 +297,7 @@ IasAvbProcessingResult IasAvbTransmitEngine::start()
             if (0u != errCount)
             {
               DLT_LOG_CXX(*mLog, DLT_LOG_WARN, LOG_PREFIX, "Couldn't configure shaper!(",
-                  strerror(err), " error count:", errCount, ")");
+                  uint32_t(err), " error count:", errCount, ")");
               // do not abort, try running without config
             }
           }
@@ -807,66 +782,6 @@ IasAvbProcessingResult IasAvbTransmitEngine::deactivateAvbStream(IasAvbStreamId 
   }
 
   return result;
-}
-
-void IasAvbTransmitEngine::updateShapers()
-{
-  uint32_t bwHigh = 0;
-  uint32_t bwLow = 0;
-  for (uint32_t i = 0u; i < IasAvbTSpec::cIasAvbNumSupportedClasses; i++)
-  {
-    IasAvbTransmitSequencer *seq = mSequencers[i];
-    if (NULL != seq)
-    {
-      switch (seq->getClass())
-      {
-      case IasAvbSrClass::eIasAvbSrClassHigh:
-        bwHigh = seq->getCurrentBandwidth();
-        break;
-
-      case IasAvbSrClass::eIasAvbSrClassLow:
-        bwLow = seq->getCurrentBandwidth();
-        break;
-
-      default:
-        // unsupported configuration should have been caught already
-        AVB_ASSERT(false);
-      }
-    }
-  }
-
-  /**
-    * @log The values for the current bandwidth, class A -> High, class B -> Low.
-    */
-  DLT_LOG_CXX(*mLog, DLT_LOG_INFO, LOG_PREFIX, "class A:", bwHigh,
-      "class B:", bwLow);
-
-
-  /**
-   * Convert bandwidth values from "per second" to "per observation interval",
-   * always rounding up. Note: libigb has the observation intervals
-   * hard-coded for class A and B!
-   */
-  if (bwHigh > 0u)
-  {
-    bwHigh = (bwHigh + 7999u) / 8000u;
-  }
-
-  if (bwLow > 0u)
-  {
-    bwLow = (bwLow + 3999u) / 4000u;
-  }
-
-  /* hack: call the igb function with a pseudo packet size of 83 bytes payload, since this would results
-   * in a packet on the wire of exactly 1000bits, which enables us to use the class_a and class_b
-   * parameters to specify the bandwidth in kbit/observationInterval
-   */
-  const int32_t err = igb_set_class_bandwidth(mIgbDevice, bwHigh, bwLow, 83u, 83u);
-  if (err < 0)
-  {
-      DLT_LOG_CXX(*mLog, DLT_LOG_WARN, LOG_PREFIX, "Couldn't configure shaper: ",
-          strerror(err));
-  }
 }
 
 IasAvbProcessingResult IasAvbTransmitEngine::connectAudioStreams(const IasAvbStreamId & avbStreamId, IasLocalAudioStream * localStream)

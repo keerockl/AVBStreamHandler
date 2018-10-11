@@ -10,7 +10,7 @@
  */
 
 #include "avb_streamhandler/IasAvbDiagnosticPacket.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include "avb_helper/ias_safe.h"
 

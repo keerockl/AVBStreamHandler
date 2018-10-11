@@ -1,0 +1,18 @@
+#
+# @COPYRIGHT_TAG@
+#
+
+#------------------------------------------------------------------
+# Build the Network Driver library
+#------------------------------------------------------------------
+add_library( ias-media_transport-avb_networkdriver STATIC
+    private/src/avb_networkdriver/IasAvbNetworkDriver.cpp
+    private/src/avb_networkdriver/IasAvbIgbDriver.cpp
+    private/src/avb_networkdriver/IasAvbPacket.cpp
+    private/src/avb_networkdriver/IasAvbPacketPool.cpp
+    private/src/avb_networkdriver/IasAvbIgbPacketPool.cpp
+    private/src/avb_networkdriver/IasAvbSocketDriver.cpp
+    private/src/avb_networkdriver/IasAvbSocketPacketPool.cpp
+)
+
+target_compile_options( ias-media_transport-avb_networkdriver PUBLIC -fPIC )

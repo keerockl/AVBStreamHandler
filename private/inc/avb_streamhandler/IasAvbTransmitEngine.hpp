@@ -29,6 +29,7 @@ class IasLocalAudioStream;
 class IasLocalVideoStream;
 class IasAvbClockDomain;
 class IasAvbTransmitSequencer;
+class IasAvbNetworkDriver;
 
 class IasAvbTransmitEngine : private IasAvbStreamHandlerEventInterface
 {
@@ -261,7 +262,6 @@ class IasAvbTransmitEngine : private IasAvbStreamHandlerEventInterface
     IasAvbTransmitSequencer * getSequencerByStream(IasAvbStream *stream) const;
     IasAvbTransmitSequencer * getSequencerByClass(IasAvbSrClass qavClass) const;
     IasAvbProcessingResult createSequencerOnDemand(IasAvbSrClass qavClass);
-    void updateShapers();
 
     //{@
     /// @brief IasAvbStreamHandlerEventInterface implementation
@@ -295,11 +295,12 @@ class IasAvbTransmitEngine : private IasAvbStreamHandlerEventInterface
     IasAvbStreamHandlerEventInterface *mEventInterface;
     DltContext     *mLog;           // context for Log & Trace
     bool               mBTMEnable;
+    IasAvbNetworkDriver  *mNetworkDriver;
 };
 
 inline bool IasAvbTransmitEngine::isInitialized() const
 {
-  return (NULL != mIgbDevice);
+  return (NULL != mNetworkDriver);
 }
 
 

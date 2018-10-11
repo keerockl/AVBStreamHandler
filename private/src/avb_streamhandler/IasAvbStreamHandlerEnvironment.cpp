@@ -17,6 +17,9 @@
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
 #include "avb_helper/ias_safe.h"
 
+#include "avb_networkdriver/IasAvbIgbDriver.hpp"
+#include "avb_networkdriver/IasAvbSocketDriver.hpp"
+
 #include <cerrno>
 #include <cstring>
 #include <arpa/inet.h>
@@ -118,6 +121,7 @@ IasAvbStreamHandlerEnvironment::IasAvbStreamHandlerEnvironment(DltLogLevelType d
   , mAudioFlowLoggingState(0)
   , mAudioFlowLoggingTimestamp(0u)
 #endif
+  , mNetworkDriver()
 {
   mLog = new DltContext();
   // register own context for DLT
@@ -151,8 +155,6 @@ IasAvbStreamHandlerEnvironment::~IasAvbStreamHandlerEnvironment()
     DLT_LOG_CXX(*mLog,  DLT_LOG_INFO, LOG_PREFIX, "igb_detach");
     igb_detach(mIgbDevice); // @@WARN: This will seg fault without the correct capabilities
   }
-  delete mIgbDevice;
-  mIgbDevice = NULL;
 
   delete mDiaLogger;
   mDiaLogger = NULL;
@@ -161,6 +163,12 @@ IasAvbStreamHandlerEnvironment::~IasAvbStreamHandlerEnvironment()
   {
     (void) ::close(mStatusSocket);
     mStatusSocket = -1;
+  }
+
+  if (NULL != mNetworkDriver)
+  {
+    delete mNetworkDriver;
+    mNetworkDriver = NULL;
   }
 
   mClockDriver = NULL;
@@ -199,13 +207,11 @@ void IasAvbStreamHandlerEnvironment::emergencyShutdown()
   // helper flag for coverage testing
   if (mArmed)
   {
-    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb device might be unstable");
-    if (NULL != mIgbDevice)
+    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "network driver might be unstable");
+    if (NULL != mNetworkDriver)
     {
-      DLT_LOG_CXX(*mLog,  DLT_LOG_ERROR, LOG_PREFIX, "igb_detach");
-      igb_detach(mIgbDevice); // @@WARN: This will seg fault without the correct capabilities
-      delete mIgbDevice;
-      mIgbDevice = NULL;
+      DLT_LOG_CXX(*mLog,  DLT_LOG_ERROR, LOG_PREFIX, "network driver detach");
+      mNetworkDriver->emergencyShutdown();
     }
   }
 }
@@ -220,14 +226,14 @@ IasAvbProcessingResult IasAvbStreamHandlerEnvironment::createPtpProxy()
     mPtpProxy = new (nothrow) IasLibPtpDaemon("/ptp", static_cast<uint32_t>(SHM_SIZE));
     if (NULL != mPtpProxy)
     {
-      if (NULL == mIgbDevice)
+      if (NULL == mNetworkDriver)
       {
         // must create igb device first
         ret = eIasAvbProcInitializationFailed;
       }
       else
       {
-        ret = mPtpProxy->init(mIgbDevice);
+        ret = mPtpProxy->init();
       }
     }
     else
@@ -336,171 +342,43 @@ IasAvbProcessingResult IasAvbStreamHandlerEnvironment::setTxRingSize()
 IasAvbProcessingResult IasAvbStreamHandlerEnvironment::createIgbDevice()
 {
   IasAvbProcessingResult ret = eIasAvbProcOK;
-  int32_t err = -1;
 
-  if (NULL == mIgbDevice)
+  // workaround: try to query own mac address. if that fails, we won't have sufficient permissions anyway
+  // note: querySourceMac() also sets mInterfaceName, if not already done
+  if (eIasAvbProcOK != querySourceMac())
   {
-    mIgbDevice = new (nothrow) device_t;
-
-    if (NULL == mIgbDevice)
+    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb device cannot be attached (check permissions and net interface name");
+    ret = eIasAvbProcInitializationFailed;
+  }
+  else
+  {
+    std::string nwIfType = "";
+    (void) getConfigValue(IasRegKeys::cNwIfType, nwIfType);
+    if ("direct-dma" == nwIfType)
     {
-      DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "Not enough memory to allocate device_t");
-      ret = eIasAvbProcNotEnoughMemory;
+      mNetworkDriver = new IasAvbIgbDriver(*mLog);
+    }
+    else if ("socket" == nwIfType)
+    {
+      mNetworkDriver = new IasAvbSocketDriver(*mLog);
+    }
+
+    if (mNetworkDriver)
+    {
+      ret = mNetworkDriver->init();
+      if (eIasAvbProcOK == ret)
+      {
+        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "network driver init ok");
+      }
+      else
+      {
+        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "network driver init failed");
+      }
     }
     else
     {
-      bool result = false;
-      const uint16_t cPciPathMaxLen = 24u;
-      char devPath[cPciPathMaxLen]  = {0};
-
-      mIgbDevice->private_data = NULL;
-
-      std::ostringstream filePath;
-      getNetworkInterfaceName();
-      filePath << "/sys/class/net/" << mInterfaceName.c_str() << "/device/uevent";
-      std::cout << "Interface name: " << mInterfaceName.c_str() << std::endl;
-
-      std::string fileName = filePath.str();
-      std::ifstream configFile(fileName);
-      std::string configLine;
-
-      if (configFile.good())
-      {
-        while (std::getline(configFile, configLine))
-        {
-          std::stringstream line(configLine);
-          std::string value;
-          std::vector<std::string> values;
-
-          if (configLine.find("PCI_ID") != std::string::npos)
-          {
-            while (std::getline(line, value, '='))
-            {
-              while (std::getline(line, value, ':'))
-              {
-                values.push_back(value);
-              }
-            }
-
-            mIgbDevice->pci_device_id = uint16_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-
-            mIgbDevice->pci_vendor_id = uint16_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-          }
-          else if (configLine.find("PCI_SLOT_NAME") != std::string::npos)
-          {
-            while (std::getline(line, value, '='))
-            {
-              while (std::getline(line, value, ':'))
-              {
-                std::stringstream tmpLine(value);
-                while (std::getline(tmpLine, value, '.'))
-                {
-                  values.push_back(value);
-                }
-              }
-            }
-
-            mIgbDevice->func = uint8_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-
-            mIgbDevice->dev = uint8_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-
-            mIgbDevice->bus = uint8_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-
-            mIgbDevice->domain = uint16_t(std::stoi(values.back(), nullptr, 16));
-            values.pop_back();
-          }
-          result = true;
-        }
-      }
-      else
-      {
-        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "Could not find configuration file for interface");
-        ret = eIasAvbProcInitializationFailed;
-      }
-
-      if (result)
-      {
-        // workaround: try to query own mac address. if that fails, we won't have sufficient permissions anyway
-        // note: querySourceMac() also sets mInterfaceName, if not already done
-        if (eIasAvbProcOK != querySourceMac())
-        {
-          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb device cannot be attached (check permissions and net interface name");
-          ret = eIasAvbProcInitializationFailed;
-        }
-        else
-        {
-          (void) ::snprintf(devPath, cPciPathMaxLen, "%04x:%02x:%02x.%d", mIgbDevice->domain, mIgbDevice->bus, mIgbDevice->dev, mIgbDevice->func);
-
-          err = igb_attach(devPath, mIgbDevice);
-          if (err)
-          {
-            DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb_attach for",
-                mInterfaceName.c_str(), "at",
-                devPath, "failed (", int32_t(err),
-                ",", strerror(err), ")");
-            ret = eIasAvbProcInitializationFailed;
-          }
-          else
-          {
-            DLT_LOG_CXX(*mLog,  DLT_LOG_INFO, LOG_PREFIX, "igb_attach OK");
-#if defined(DIRECT_RX_DMA)
-            err = igb_attach_rx(mIgbDevice);
-            if (err)
-            {
-              DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb_attach_rx failed (",
-                  int32_t(err), ")");
-              ret = eIasAvbProcInitializationFailed;
-            }
-            else
-            {
-#endif /* DIRECT_RX_DMA */
-              err = igb_attach_tx(mIgbDevice);
-              if (err)
-              {
-                DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb_attach_tx failed (",
-                    int32_t(err), ")");
-                ret = eIasAvbProcInitializationFailed;
-              }
-#if defined(DIRECT_RX_DMA)
-            }
-
-            if (eIasAvbProcOK == ret)
-#else
-            else
-#endif /* DIRECT_RX_DMA */
-            {
-              err = igb_init(mIgbDevice);
-              if (err)
-              {
-                DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb_init failed (",
-                    int32_t(err), ")");
-                ret = eIasAvbProcInitializationFailed;
-              }
-            }
-            if (eIasAvbProcOK != ret)
-            {
-              DLT_LOG_CXX(*mLog,  DLT_LOG_ERROR, LOG_PREFIX, "igb_detach (init failed)");
-              igb_detach(mIgbDevice);
-            }
-          }
-        }
-      }
-      else
-      {
-        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "could not load config values");
-        ret = eIasAvbProcInitializationFailed;
-      }
-
-      if (eIasAvbProcOK != ret)
-      {
-        delete mIgbDevice;
-        mIgbDevice = NULL;
-      }
+      DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "network driver create failed");
+      ret = eIasAvbProcErr;
     }
   }
 
@@ -778,6 +656,7 @@ void IasAvbStreamHandlerEnvironment::setDefaultConfigValues()
 
   // default values apply to I210 on Crestview Hills module
   setConfigValue(IasRegKeys::cNwIfName, "eth0");
+  setConfigValue(IasRegKeys::cNwIfType, "direct-dma");
 
   // ALSA section
   setConfigValue(IasRegKeys::cAlsaNumFrames, 256u);

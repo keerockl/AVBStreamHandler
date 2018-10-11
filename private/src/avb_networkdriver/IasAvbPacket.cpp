@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2018 Intel Corporation. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ @COPYRIGHT_TAG@
  */
 /**
  * @file    IasAvbPacket.cpp
@@ -9,7 +7,7 @@
  * @date    2013
  */
 
-#include "avb_streamhandler/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
 #include "avb_helper/ias_safe.h"
 
 namespace IasMediaTransportAvb

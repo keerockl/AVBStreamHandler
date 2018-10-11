@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2018 Intel Corporation. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ @COPYRIGHT_TAG@
  */
 /**
  * @file    IasAvbPacket.hpp
@@ -15,7 +13,7 @@
 #ifndef IAS_MEDIATRANSPORT_AVBSTREAMHANDLER_AVBPACKET_HPP
 #define IAS_MEDIATRANSPORT_AVBSTREAMHANDLER_AVBPACKET_HPP
 
-#include "IasAvbTypes.hpp"
+#include "avb_streamhandler/IasAvbTypes.hpp"
 extern "C"
 {
   #include "igb.h"
@@ -25,6 +23,8 @@ namespace IasMediaTransportAvb
 {
 
 class IasAvbPacketPool;
+class IasAvbIgbPacketPool;
+class IasAvbSocketPacketPool;
 
 /*
  * We inherit from the igb_packet C-struct in order to convert back and forth between the types without
@@ -111,6 +111,8 @@ class IasAvbPacket : private igb_packet
 private:
 
     friend class IasAvbPacketPool;
+    friend class IasAvbIgbPacketPool;
+    friend class IasAvbSocketPacketPool;
 
     static const uint32_t cMagic = 0xFB210871u;
 

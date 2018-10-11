@@ -11,7 +11,7 @@
 
 #include "avb_streamhandler/IasAvbVideoStream.hpp"
 #include "avb_streamhandler/IasLocalVideoStream.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include "avb_streamhandler/IasAvbRxStreamClockDomain.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"

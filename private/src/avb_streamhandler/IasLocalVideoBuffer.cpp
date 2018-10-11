@@ -13,7 +13,7 @@
 
 #include "avb_streamhandler/IasLocalVideoBuffer.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_helper/ias_safe.h"
 
 #include <cmath>

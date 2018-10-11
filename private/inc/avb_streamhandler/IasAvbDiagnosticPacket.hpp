@@ -14,7 +14,7 @@
 #define MEDIA_TRANSPORT_AVB_STREAMHANDLER_PRIVATE_INC_AVB_STREAMHANDLER_IASAVBDIAGNOSTICPACKET_HPP_
 
 #include "avb_streamhandler/IasAvbTypes.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
 
 namespace IasMediaTransportAvb
 {

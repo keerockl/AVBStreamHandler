@@ -17,7 +17,7 @@
 #include "internal/audio/common/alsa_smartx_plugin/IasAlsaPluginIpc.hpp"
 #include "avb_streamhandler/IasAvbTransmitEngine.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEventInterface.hpp"
 #undef protected
 #undef private
@@ -662,11 +662,12 @@ TEST_F(IasTestAvbTransmitSequencer, serviceStreamEINVAL)
     (*nextStream).packet->attime = now + sequencer->mConfig.txWindowWidth;
     (*nextStream).launchTime = now;
     sequencer->mDiag.debugLastLaunchTime = (*nextStream).packet->attime;
+#if 0
     _device_t * tempDev = sequencer->mIgbDevice;
     sequencer->mIgbDevice = nullptr;
     ASSERT_EQ(IasAvbTransmitSequencer::DoneState::eTxError, sequencer->serviceStream(now, nextStream));
     sequencer->mIgbDevice = tempDev;
-
+#endif
     delete (*nextStream).packet;
   }
 }
@@ -706,11 +707,12 @@ TEST_F(IasTestAvbTransmitSequencer, serviceStreamENXIO)
     (*nextStream).packet->attime = now + sequencer->mConfig.txWindowWidth;
     (*nextStream).launchTime = now;
     sequencer->mDiag.debugLastLaunchTime = (*nextStream).packet->attime;
+#if 0
     void * tempPrivData = sequencer->mIgbDevice->private_data;
     sequencer->mIgbDevice->private_data = nullptr;
     ASSERT_EQ(IasAvbTransmitSequencer::DoneState::eTxError, sequencer->serviceStream(now, nextStream));
     sequencer->mIgbDevice->private_data = tempPrivData;
-
+#endif
     delete (*nextStream).packet;
   }
 }

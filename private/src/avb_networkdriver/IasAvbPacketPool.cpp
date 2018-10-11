@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2018 Intel Corporation. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ @COPYRIGHT_TAG@
  */
 /**
  * @file    IasAvbPacketPool.cpp
@@ -9,7 +7,7 @@
  * @date    2013
  */
 
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include <cstring>
 #include <unistd.h>
@@ -30,7 +28,7 @@ IasAvbPacketPool::IasAvbPacketPool(DltContext &dltContext) :
   mPoolSize(0u),
   mFreeBufferStack(),
   mBase(NULL),
-  mDmaPages()
+  mDirection(IasAvbStreamDirection::eIasAvbTransmitToNetwork)
 {
   // do nothing
 }
@@ -41,12 +39,14 @@ IasAvbPacketPool::IasAvbPacketPool(DltContext &dltContext) :
  */
 IasAvbPacketPool::~IasAvbPacketPool()
 {
-  cleanup();
+  doCleanup();
 }
 
 
-IasAvbProcessingResult IasAvbPacketPool::init(const size_t packetSize, const uint32_t poolSize)
+IasAvbProcessingResult IasAvbPacketPool::init(const size_t packetSize, const uint32_t poolSize, IasAvbStreamDirection direction)
 {
+  (void)direction;
+
   IasAvbProcessingResult ret = eIasAvbProcOK;
 
   if (NULL != mBase)
@@ -89,100 +89,14 @@ IasAvbProcessingResult IasAvbPacketPool::init(const size_t packetSize, const uin
       }
       else
       {
+        mPacketSize = packetSize;
         mPoolSize = poolSize;
       }
     }
 
     if (eIasAvbProcOK == ret)
     {
-      device_t* igbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
-      Page* page = NULL;
-
-      if (NULL == igbDevice)
-      {
-        /*
-         * @log Init failed: Returned igbDevice == nullptr
-         */
-        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " Failed to getIgbDevice!");
-        ret = eIasAvbProcInitializationFailed;
-      }
-      else
-      {
-        page = new (nothrow) Page;
-
-        if (NULL == page)
-        {
-          /*
-           * @log Not enough memory: Couldn't allocate DMA page, Page corresponds to underlying igb_dma_alloc struct.
-           */
-          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " Not enough memory to allocate Page!");
-          ret = eIasAvbProcNotEnoughMemory;
-        }
-      }
-
-      if (eIasAvbProcOK == ret)
-      {
-        // allocate one DMA page to retrieve properties
-        if (0 != igb_dma_malloc_page( igbDevice, page ))
-        {
-          /*
-           * @log Init failed: Failed to retrieve DMA page.
-           */
-          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " Failed to igb_dma_malloc_page!");
-          ret = eIasAvbProcInitializationFailed;
-        }
-        else
-        {
-          uint32_t packetCountTotal = 0u;
-          mPacketSize = packetSize;
-
-          // find out how many packets fit into a page
-          const uint32_t packetsPerPage = uint32_t( size_t(page->mmap_size) / packetSize );
-
-          if (0u == packetsPerPage)
-          {
-            // packetSize larger than dma page size - not supported by libigb
-            /*
-             * @log Unsupported format: Packet size is larger than the dma page size - not supported by libigb.
-             */
-            DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " packet size > ",
-                page->mmap_size, "not supported!");
-            ret = eIasAvbProcUnsupportedFormat;
-          }
-          else
-          {
-            const uint32_t pagesNeeded = (poolSize + (packetsPerPage - 1u)) / packetsPerPage;
-
-            DLT_LOG_CXX(*mLog, DLT_LOG_DEBUG, LOG_PREFIX, " DMA page overhead (bytes:",
-                (uint64_t(pagesNeeded) * uint64_t(page->mmap_size)) - (uint64_t(poolSize) * uint64_t(packetSize)));
-
-            mDmaPages.reserve(pagesNeeded);
-
-            ret = initPage( page, packetsPerPage, packetCountTotal );
-
-            // 1st page is already allocated
-            for (uint32_t pageCount = 1u; (eIasAvbProcOK == ret) && (pageCount < pagesNeeded); pageCount++)
-            {
-              page = new (nothrow) Page;
-
-              if (NULL == page)
-              {
-                DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " Not enough memory to allocate Page!");
-                ret = eIasAvbProcNotEnoughMemory;
-              }
-              else if (0 != igb_dma_malloc_page( igbDevice, page ))
-              {
-                DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, " igb dma memory allocation failure");
-                ret = eIasAvbProcInitializationFailed;
-              }
-              else
-              {
-                ret = initPage( page, packetsPerPage, packetCountTotal );
-              }
-            }
-          }
-        }
-      }
+      ret = derivedInit();
     }
 
     if (eIasAvbProcOK != ret)
@@ -193,39 +107,6 @@ IasAvbProcessingResult IasAvbPacketPool::init(const size_t packetSize, const uin
 
   return ret;
 }
-
-
-IasAvbProcessingResult IasAvbPacketPool::initPage(Page * page, const uint32_t packetsPerPage, uint32_t & packetCountTotal)
-{
-  IasAvbProcessingResult ret = eIasAvbProcOK;
-
-  AVB_ASSERT( NULL != mBase );
-  AVB_ASSERT( NULL != page );
-  AVB_ASSERT( mPacketSize > 0u );
-
-  // add page to list
-  mDmaPages.push_back(page);
-
-  for (uint32_t packetIdx = 0u; (packetIdx < packetsPerPage) && (packetCountTotal < mPoolSize); packetIdx++, packetCountTotal++)
-  {
-    /*
-     *  assign unique section of dma page to each igb packet
-     *  Note that this is not touched anymore during subsequent operation!
-     */
-    IasAvbPacket & packet = mBase[packetCountTotal];
-
-    packet.offset = uint32_t( packetIdx * mPacketSize );
-    packet.vaddr = static_cast<uint8_t*>(page->dma_vaddr) + packet.offset;
-    packet.map.mmap_size = page->mmap_size;
-    packet.map.paddr = page->dma_paddr;
-
-    packet.setHomePool( this );
-    mFreeBufferStack.push_back( &packet );
-  }
-
-  return ret;
-}
-
 
 void IasAvbPacketPool::cleanup()
 {
@@ -255,29 +136,28 @@ void IasAvbPacketPool::cleanup()
                 uint32_t(mFreeBufferStack.size()), "/", mPoolSize);
   }
 
-  device_t* igbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
+  derivedCleanup();
 
-  while (!mDmaPages.empty())
-  {
-    Page* page = mDmaPages.back();
-    mDmaPages.pop_back();
-
-    AVB_ASSERT( NULL != page  );
-
-    if (NULL == igbDevice)
-    {
-    }
-    else
-    {
-      igb_dma_free_page( igbDevice, page );
-      delete page;
-    }
-  }
-
-  delete[] mBase;
-  mBase = NULL;
+  doCleanup();
 }
 
+IasAvbProcessingResult IasAvbPacketPool::derivedInit()
+{
+  return eIasAvbProcOK;
+}
+
+void IasAvbPacketPool::derivedCleanup()
+{
+}
+
+void IasAvbPacketPool::doCleanup()
+{
+  if (mBase)
+  {
+    delete[] mBase;
+    mBase = NULL;
+  }
+}
 
 IasAvbPacket* IasAvbPacketPool::getPacket()
 {
@@ -429,5 +309,6 @@ IasAvbProcessingResult IasAvbPacketPool::returnPacket(IasAvbPacket* packet)
 
   return ret;
 }
+
 
 } // namespace IasMediaTransportAvb

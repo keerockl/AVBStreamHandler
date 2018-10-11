@@ -30,7 +30,7 @@
 #include "avb_streamhandler/IasAvbDiagnosticPacket.hpp"
 #include "avb_streamhandler/IasAvbTransmitEngine.hpp"
 #include "avb_streamhandler/IasAvbAudioStream.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbClockReferenceStream.hpp"
 #include "avb_streamhandler/IasTestToneStream.hpp"
 #include "avb_streamhandler/IasAlsaEngine.hpp"

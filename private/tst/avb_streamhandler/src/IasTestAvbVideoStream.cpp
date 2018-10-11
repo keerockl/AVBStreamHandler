@@ -20,7 +20,7 @@
 
 #include "media_transport/avb_streamhandler_api/IasAvbStreamHandlerTypes.hpp"
 #include "test_common/IasAvbConfigurationInfo.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "test_common/IasSpringVilleInfo.hpp"
 #include "avb_streamhandler/IasAvbHwCaptureClockDomain.hpp"
 #include "avb_streamhandler/IasLocalVideoStream.hpp"

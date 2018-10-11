@@ -10,7 +10,7 @@
  */
 
 #include "avb_streamhandler/IasAvbClockReferenceStream.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include "avb_streamhandler/IasAvbRxStreamClockDomain.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
@@ -66,6 +66,7 @@ IasAvbClockReferenceStream::IasAvbClockReferenceStream()
   , mFirstRun(true)
   , mBTMEnable(false)
   , mMasterTimeUpdateMinInterval(0u)
+  , mVlanOffloadEnable(false)
 {
   // do nothing
 }
@@ -143,7 +144,7 @@ IasAvbProcessingResult IasAvbClockReferenceStream::initTransmit(IasAvbSrClass sr
       uint16_t packetSize = uint16_t(mCrfHeaderSize + mPayloadHeaderSize + (cCrfTimeStampSize * crfStampsPerPdu));
 
 #if DEBUG_LAUNCHTIME
-      packetSize += 8u;
+      packetSize = static_cast<uint16_t>(packetSize + 8u);
 #endif
 
       if (packetSize >= ETH_DATA_LEN)
@@ -170,6 +171,13 @@ IasAvbProcessingResult IasAvbClockReferenceStream::initTransmit(IasAvbSrClass sr
 
     if (eIasAvbProcOK == result)
     {
+      std::string nwIfType = "";
+      (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cNwIfType, nwIfType);
+      if ("socket" == nwIfType)
+      {
+        mVlanOffloadEnable = true;
+      }
+
       mMasterTimeout = 2000000000; // default is 2 seconds
       (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cAudioClockTimeout, mMasterTimeout);
 
@@ -325,10 +333,13 @@ IasAvbProcessingResult IasAvbClockReferenceStream::prepareAllPackets()
     packetData += cIasAvbMacAddressLength;
 
     // VLAN tag
-    *(packetData++) = 0x81u;
-    *(packetData++) = 0x00u;
-    *(packetData++) = uint8_t(getVlanData() >> 8);
-    *(packetData++) = uint8_t(getVlanData());
+    if (!mVlanOffloadEnable)
+    {
+      *(packetData++) = 0x81u;
+      *(packetData++) = 0x00u;
+      *(packetData++) = uint8_t(getVlanData() >> 8);
+      *(packetData++) = uint8_t(getVlanData());
+    }
 
     /* 1722 header */
     *(packetData++) = 0x22u; // 1722 Ethtype high
@@ -394,7 +405,9 @@ IasAvbProcessingResult IasAvbClockReferenceStream::prepareAllPackets()
      * later on.
      */
     referencePacket->len = uint32_t(packetData - packetStart) + (mTimeStampsPerPdu * cCrfTimeStampSize);
-
+#if DEBUG_LAUNCHTIME
+    referencePacket->len += 8;
+#endif
     // now copy the template to all other packets in the pool
     result = getPacketPool().initAllPacketsFromTemplate(referencePacket);
 
@@ -532,7 +545,13 @@ bool IasAvbClockReferenceStream::writeToAvbPacket(IasAvbPacket* packet, uint64_t
   {
     AVB_ASSERT(NULL != packet);
     AVB_ASSERT(NULL != packet->getBasePtr());
-    uint8_t* const avtpBase8 = static_cast<uint8_t*>(packet->getBasePtr()) + ETH_HLEN + 4u; // consider VLAN tag
+    uint8_t* avtpBase8 = static_cast<uint8_t*>(packet->getBasePtr()) + ETH_HLEN + 4u; // consider VLAN tag
+
+    if (mVlanOffloadEnable)
+    {
+      avtpBase8 -= 4u;
+    }
+
     uint32_t* const avtpBase32 = reinterpret_cast<uint32_t*>(avtpBase8);
     uint64_t* const crfStampBase64 = reinterpret_cast<uint64_t*>(avtpBase32 + mPayloadOffset32);
 
@@ -657,7 +676,6 @@ bool IasAvbClockReferenceStream::writeToAvbPacket(IasAvbPacket* packet, uint64_t
 
 #if DEBUG_LAUNCHTIME
     (void) memcpy(avtpBase8 + mCrfHeaderSize + mPayloadHeaderSize + mTimeStampsPerPdu * cCrfTimeStampSize, &mPacketLaunchTime, 8);
-    packet->len += 8;
 #endif
 
     bool clockValid = (IasAvbClockDomain::eIasAvbLockStateLocked == pClockDomain->getLockState());

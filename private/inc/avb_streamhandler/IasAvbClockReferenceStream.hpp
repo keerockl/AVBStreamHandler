@@ -120,6 +120,7 @@ class IasAvbClockReferenceStream : public IasAvbStream
     bool                  mFirstRun;
     bool                  mBTMEnable;
     uint64_t              mMasterTimeUpdateMinInterval;
+    bool                  mVlanOffloadEnable;
 };
 
 } // namespace IasMediaTransportAvb

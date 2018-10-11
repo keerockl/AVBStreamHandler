@@ -16,8 +16,9 @@
 
 #include "avb_streamhandler/IasAvbAudioStream.hpp"
 #include "avb_streamhandler/IasAvbVideoStream.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbNetworkDriver.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEventInterface.hpp"
 // TO BE REPLACED #include "core_libraries/btm/ias_dlt_btm.h"
@@ -57,7 +58,6 @@ static const std::string cClassName = "IasAvbTransmitSequencer::";
 IasAvbTransmitSequencer::IasAvbTransmitSequencer(DltContext &ctx)
   : mThreadControl(0u)
   , mTransmitThread(NULL)
-  , mIgbDevice(NULL)
   , mQueueIndex(uint32_t(-1))
   , mClass(IasAvbSrClass::eIasAvbSrClassHigh)
   , mRequestCount(0)
@@ -77,6 +77,7 @@ IasAvbTransmitSequencer::IasAvbTransmitSequencer(DltContext &ctx)
   , mFirstRun(true)
   , mBTMEnable(false)
   , mStrictPktOrderEn(true)
+  , mNetworkDriver(NULL)
 {
   DLT_LOG_CXX(*mLog, DLT_LOG_VERBOSE, LOG_PREFIX);
 }
@@ -165,8 +166,8 @@ IasAvbProcessingResult IasAvbTransmitSequencer::init(uint32_t queueIndex, IasAvb
     mClass = qavClass;
     mQueueIndex = queueIndex;
     mDoReclaim = doReclaim;
-    mIgbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
-    AVB_ASSERT(NULL != mIgbDevice);
+    mNetworkDriver = IasAvbStreamHandlerEnvironment::getNetworkDriver()
+    AVB_ASSERT(NULL != mNetworkDriver);
 
     (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cXmitWndWidth, mConfig.txWindowWidthInit);
     (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cXmitWndPitch, mConfig.txWindowPitchInit);
@@ -389,19 +390,10 @@ IasAvbProcessingResult IasAvbTransmitSequencer::stop()
 uint32_t IasAvbTransmitSequencer::reclaimPackets()
 {
   uint32_t ret = 0u;
-  igb_packet* packetList = NULL;
 
-  if (mDoReclaim)
+  if (mNetworkDriver)
   {
-    // check and return packets that are not used any longer
-    // NOTE: this is done for all sequencers, not only for this one!
-    igb_clean(mIgbDevice, &packetList);
-    while (NULL != packetList)
-    {
-      IasAvbPacketPool::returnPacket(packetList);
-      ret++;
-      packetList = packetList->next;
-    }
+    ret = mNetworkDriver->reclaimPackets();
   }
 
   return ret;
@@ -942,7 +934,7 @@ IasAvbTransmitSequencer::DoneState IasAvbTransmitSequencer::serviceStream(uint64
           }
 #endif
 
-          result = current.packet->xmit(mIgbDevice, mQueueIndex);
+          result = mNetworkDriver->xmit(current.packet, mQueueIndex);
           if (mFirstRun && mBTMEnable)
           {
             mFirstRun = false;
@@ -1357,7 +1349,7 @@ IasAvbProcessingResult IasAvbTransmitSequencer::addStreamToTransmitList(IasAvbSt
             }
           }
 
-          updateShaper();
+          mNetworkDriver->updateShaper((mCurrentBandwidth * mShaperBwRate / 100), mQueueIndex, mMaxFrameSizeHigh);
         }
 
         {
@@ -1453,7 +1445,7 @@ IasAvbProcessingResult IasAvbTransmitSequencer::removeStreamFromTransmitList(Ias
           }
         }
 
-        updateShaper();
+        mNetworkDriver->updateShaper((mCurrentBandwidth * mShaperBwRate / 100), mQueueIndex, mMaxFrameSizeHigh);
       }
     }
   }
@@ -1478,98 +1470,7 @@ void IasAvbTransmitSequencer::resetPoolsOfActiveStreams()
 
 void IasAvbTransmitSequencer::updateShaper()
 {
-  double bandWidth = 0.0;
-  int32_t  linkSpeed = 0;
-  int32_t  idleSlope = -1;
-  uint32_t linkRate  = TQAVCC_LINKRATE;
-  uint32_t maxInterferenceSize = cTxMaxInterferenceSize;
-
-  uint32_t tqavhcReg   = 0u; // Tx Qav Hi Credit TQAVHC
-  uint32_t tqavccReg   = 0u; // Tx Qav Credit Control TQAVCC
-  uint32_t tqavctrlReg = 0u; // Tx Qav Control TQAVCTRL
-
-  // get current link speed
-  linkSpeed = IasAvbStreamHandlerEnvironment::getLinkSpeed();
-
-  if (100 == linkSpeed)
-  {
-    // the percentage bandwith out of full line rate @ 100Mbps (mCurrentBandwidth = kBit/s)
-    bandWidth = (mCurrentBandwidth * mShaperBwRate / 100) * 1000.0 / 100000000.0;
-    idleSlope = static_cast<uint32_t>(bandWidth * 0.2 * (double)linkRate + 0.5);
-  }
-  else if (1000 == linkSpeed)
-  {
-    // the percentage bandwith out of full line rate @ 1Gbps (mCurrentBandwidth = kBit/s)
-    bandWidth = (mCurrentBandwidth * mShaperBwRate / 100) * 1000.0 / 1000000000.0;
-    idleSlope = static_cast<uint32_t>(bandWidth * 2.0 * (double)linkRate + 0.5);
-  }
-  else
-  {
-    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "unknown link speed", linkSpeed);
-    AVB_ASSERT(false);
-  }
-
-  if (0 == idleSlope)
-  {
-    // reset the registers with default value
-    tqavhcReg = TQAVCH_ZERO_CREDIT;
-    tqavccReg = TQAVCC_QUEUEMODE; // no idle slope
-  }
-  else if ((0 < idleSlope) && (static_cast<uint32_t>(idleSlope) < linkRate))
-  {
-    // idleSlope must be smaller than linkRate = 0x7735 credits/byte.
-
-    if (0u == mQueueIndex)
-    {
-      tqavhcReg = TQAVCH_ZERO_CREDIT + (idleSlope * maxInterferenceSize / linkRate);
-    }
-    else
-    {
-      uint32_t idleSlopeClassA = 0u;
-
-      (void) igb_readreg(mIgbDevice, TQAVHC(0), &idleSlopeClassA);
-      idleSlopeClassA ^= TQAVCC_QUEUEMODE;
-
-      if ((0 == idleSlopeClassA) || (0xFFFFu == static_cast<uint16_t>(idleSlopeClassA)))
-      {
-        // idleSlope has not been set. i.e. Class A (Queue0) is not used.
-        tqavhcReg = TQAVCH_ZERO_CREDIT + (idleSlope * maxInterferenceSize / linkRate);
-      }
-      else if (static_cast<int32_t>(linkRate - idleSlopeClassA) > 0)
-      {
-        /*
-         * Add 43 bytes to mMaxFrameSizeHigh since it is the size of AVTP payload without media overhead nor header.
-         * (43 = 8 bytes preamble + SFD, 14 bytes Ethernet header, 4 bytes VLAN tag, 4 bytes CRC, 12 bytes IPG, 1 byte SRP)
-         */
-        maxInterferenceSize = maxInterferenceSize + (mMaxFrameSizeHigh + 43u);
-        linkRate = linkRate - idleSlopeClassA;
-        tqavhcReg = TQAVCH_ZERO_CREDIT + (idleSlope * maxInterferenceSize / linkRate);
-      }
-    }
-
-    tqavccReg = (TQAVCC_QUEUEMODE | idleSlope);
-  }
-
-  if ((0u != tqavhcReg) && (0u != tqavccReg))
-  {
-    // HiCredit
-    (void) igb_writereg(mIgbDevice, TQAVHC(mQueueIndex), tqavhcReg);
-
-    // QueueMode and IdleSlope
-    (void) igb_writereg(mIgbDevice, TQAVCC(mQueueIndex), tqavccReg);
-
-    // implicitly enable the Qav shaper
-    (void) igb_readreg(mIgbDevice, TQAVCTRL, &tqavctrlReg);
-    tqavctrlReg |= TQAVCTRL_TX_ARB;
-    (void) igb_writereg(mIgbDevice, TQAVCTRL, tqavctrlReg);
-
-    DLT_LOG_CXX(*mLog, DLT_LOG_INFO, LOG_PREFIX, "set shaping params (",
-        "Queue:", mQueueIndex,
-        "Bandwidth:", mCurrentBandwidth * mShaperBwRate / 100, "kBit/s",
-        "HiCredit:", tqavhcReg,
-        "IdleSlope:", idleSlope,
-        "");
-  }
+  return mNetworkDriver->updateShaper((mCurrentBandwidth * mShaperBwRate / 100), mQueueIndex, mMaxFrameSizeHigh);
 }
 
 

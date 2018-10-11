@@ -82,6 +82,7 @@ include( CMakeLists.avb_configuration_reference.txt )
 include( CMakeLists.avb_configuration_example.txt )
 include( CMakeLists.avb_clockdriver.txt )
 include( CMakeLists.avb_streamhandler_demo.txt )
+include( CMakeLists.avb_networkdriver.txt )
 include( CMakeLists.avb_video_bridge.txt )
 include( CMakeLists.avb_video_debug_app.txt )
 

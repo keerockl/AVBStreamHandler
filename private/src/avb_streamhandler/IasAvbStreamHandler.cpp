@@ -2227,11 +2227,6 @@ IasAvbProcessingResult IasAvbStreamHandler::stop( bool suspend)
 
 void IasAvbStreamHandler::emergencyStop()
 {
-  if (NULL != mAvbReceiveEngine)
-  {
-    mAvbReceiveEngine->emergencyShutdown();
-  }
-
   if (NULL != mEnvironment)
   {
     mEnvironment->emergencyShutdown();

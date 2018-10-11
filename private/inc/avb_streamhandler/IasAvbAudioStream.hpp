@@ -173,6 +173,7 @@ class IasAvbAudioStream : public IasAvbStream, public virtual IasLocalAudioStrea
     bool                  mFirstRun;
     bool                  mBTMEnable;
     uint64_t              mMasterTimeUpdateMinInterval;
+    bool                  mVlanOffloadEnable;
 
     static uint32_t sampleRateTable[];
 };

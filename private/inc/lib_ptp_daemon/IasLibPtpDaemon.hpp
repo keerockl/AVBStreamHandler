@@ -32,6 +32,8 @@ extern "C"
 
 namespace IasMediaTransportAvb {
 
+class IasAvbNetworkDriver;
+
 /**
  * @class IasLibPtpDaemon
  * @brief This class is the implementation of the PTP daemon library.
@@ -292,16 +294,6 @@ class IasLibPtpDaemon
     IasAvbProcessingResult calculateConversionCoeffs();
 
     /**
-     * @brief returns the I210 clock read from its registers and monotonic clock
-     *
-     * This method is an alternative to igb_gettime(). Since the IGB API does
-     * iteration up to 32 times to get cross timestamp, which is too many for us.
-     * Even worse it holds the lock of the IGB device during the entire iteration.
-     * This method offers a lightweight similar functionality.
-     */
-    IasAvbProcessingResult getIgbTime(uint64_t &ptpTime, uint64_t &sysTime, const clockid_t clockId);
-
-    /**
      * @brief detect tsc frequency from cpu model
      *
      * @return eIasAvbProcOK on success, error code otherwise
@@ -338,7 +330,6 @@ class IasLibPtpDaemon
     pid_t                 mProcessId; // process id of ptp daemon
     DltContext            *mLog;
 
-    device_t              *mIgbDevice;
     bool                  mLocalTimeUpdating;
     uint64_t              mMaxCrossTimestampSamples;
     uint64_t              mSysTimeMeasurementThreshold;
@@ -348,6 +339,7 @@ class IasLibPtpDaemon
     uint64_t                mTscFreq;
     uint64_t                mRawToLocalTstampThreshold;
     std::vector<double>  mRawToLocalFactors;
+    IasAvbNetworkDriver   *mNetworkDriver;
 }; // class IasLibPtpDaemon
 
 inline uint64_t IasLibPtpDaemon::getTsc()

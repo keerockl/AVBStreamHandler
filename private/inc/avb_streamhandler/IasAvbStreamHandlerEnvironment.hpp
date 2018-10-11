@@ -29,6 +29,7 @@ namespace IasMediaTransportAvb {
 class IasLibPtpDaemon;
 class IasLibMrpDaemon;
 class IasDiaLogger;
+class IasAvbNetworkDriver;
 
 //@{
 /**
@@ -139,6 +140,7 @@ static const char cAlsaSyncRxReadStart[] = "alsa.sync.rx.read.start"; // skip ti
 static const char cDiagnosticPacketDmac[] = "diagnosticpacket.dmac"; // (UInt64, default:0x011BC50AC000) sets the destination MAC address for the diagnostic packet specified in AutoCDS.
 static const char cIgbAccessTimeoutCnt[] = "igb.access.to.cnt"; // Timeout:cIgbAccessSleep (in us: 100 ms) * cIgbAccessTimeoutCnt
 static const char cApiMutex[] = "api.control.mutex"; // switch API mutex 1=enable (default), 0=off
+static const char cNwIfType[] = "network.interface.type"; ///< (std::string) network interface type to be used (direct-dma or socket) should the key be public?
 }
 //@}
 
@@ -182,6 +184,7 @@ class IasAvbStreamHandlerEnvironment : private virtual IasAvbConfigRegistryInter
     static inline IasLibPtpDaemon *getPtpProxy();
     static inline IasLibMrpDaemon *getMrpProxy();
     static inline device_t *getIgbDevice();
+    static inline IasAvbNetworkDriver *getNetworkDriver();
     static inline IasAvbClockDriverInterface *getClockDriver();
     static inline const IasAvbMacAddress *getSourceMac();
     static inline IasDiaLogger* getDiaLogger();
@@ -321,6 +324,7 @@ class IasAvbStreamHandlerEnvironment : private virtual IasAvbConfigRegistryInter
     uint32_t mAudioFlowLoggingState;
     uint64_t mAudioFlowLoggingTimestamp;
 #endif
+    IasAvbNetworkDriver *mNetworkDriver;
 };
 
 inline const std::string* IasAvbStreamHandlerEnvironment::getNetworkInterfaceName()
@@ -366,6 +370,16 @@ inline device_t* IasAvbStreamHandlerEnvironment::getIgbDevice()
   if (NULL != mInstance)
   {
     ret = mInstance->mIgbDevice;
+  }
+  return ret;
+}
+
+inline IasAvbNetworkDriver* IasAvbStreamHandlerEnvironment::getNetworkDriver()
+{
+  IasAvbNetworkDriver* ret = NULL;
+  if (NULL != mInstance)
+  {
+    ret = mInstance->mNetworkDriver;
   }
   return ret;
 }

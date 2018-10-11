@@ -17,8 +17,9 @@
 #include "avb_streamhandler/IasAvbAudioStream.hpp"
 #include "avb_streamhandler/IasAvbVideoStream.hpp"
 #include "avb_streamhandler/IasAvbClockReferenceStream.hpp"
-#include "avb_streamhandler/IasAvbPacket.hpp"
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacket.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbNetworkDriver.hpp"
 #include "avb_streamhandler/IasAvbStreamId.hpp"
 #include "lib_ptp_daemon/IasLibPtpDaemon.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEventInterface.hpp"
@@ -88,6 +89,7 @@ IasAvbReceiveEngine::IasAvbReceiveEngine()
 , mRecoverIgbReceiver(true)
 #endif /* DIRECT_RX_DMA */
 , mRcvPortIfIndex(0)
+, mNetworkDriver()
 {
   DLT_LOG_CXX(*mLog, DLT_LOG_VERBOSE, LOG_PREFIX);
 }
@@ -886,7 +888,6 @@ IasResult IasAvbReceiveEngine::run()
 #if defined(DIRECT_RX_DMA)
   IasAvbPacket* packet = NULL;
   uint32_t elapsedTimeNs = 0u; /* elapsed time (ns) without packet reception */
-  uint32_t count = 0;
 #else
   fd_set readSet;
   fd_set exceptSet;
@@ -1003,7 +1004,7 @@ IasResult IasAvbReceiveEngine::run()
             if (NULL != packet)
             {
               /* put back the used packet buffer */
-              if (igb_refresh_buffers(mIgbDevice, eRxQueue0, reinterpret_cast<struct igb_packet **>(&packet), 1u) == 0)
+              if (mNetworkDriver->reclaimRcvPacket(packet) == eIasAvbProcOK)
               {
                 packet = NULL;
               }
@@ -1018,9 +1019,7 @@ IasResult IasAvbReceiveEngine::run()
               const uint64_t rxTstamp = ptp->getLocalTime();
               const size_t rxTstampSz = sizeof(rxTstamp);
 #endif
-              /* try getting a received packet */
-              count = 1u;
-              if (igb_receive(mIgbDevice, eRxQueue0, reinterpret_cast<struct igb_packet **>(&packet), &count) == 0)
+              if (mNetworkDriver->receive(&packet, eRxQueue0) == eIasAvbProcOK)
               {
                 if (NULL != packet)
                 {
@@ -1045,28 +1044,6 @@ IasResult IasAvbReceiveEngine::run()
                     *((uint64_t*)rxTstampBuf) = rxTstamp;
                   }
 #endif
-                }
-              }
-              else
-              {
-                /*
-                 * RCTL.RXEN bit could mistakenly be turned off as initializing i210's direct rx mode if some programs
-                 * such as ifconfig or commnand concurrently access network interface on i210. This will drop all
-                 * incoming packets. Root cause is synchronization problem between libigb (user-side) and igb_avb
-                 * (kernel-side). As a workaround, monitor the bit if there is no incoming packet and enable it in case.
-                 * (defect: 201518)
-                 */
-                if (mRecoverIgbReceiver)
-                {
-                  uint32_t rctlReg = 0u;
-                  (void) igb_readreg(mIgbDevice, RCTL, &rctlReg);
-                  if (!(rctlReg & RCTL_RXEN))
-                  {
-                    rctlReg |= RCTL_RXEN;
-                    (void) igb_writereg(mIgbDevice, RCTL, rctlReg);
-
-                    DLT_LOG_CXX(*mLog, DLT_LOG_DEBUG, LOG_PREFIX, "Rx IGB Recovery: enabled RCTL.RXEN ( regval =", rctlReg, ")");
-                  }
                 }
               }
             }
@@ -1584,18 +1561,11 @@ IasAvbProcessingResult IasAvbReceiveEngine::startIgbReceiveEngine()
 {
   IasAvbProcessingResult result = eIasAvbProcInitializationFailed;
 
-  IasAvbPacket* packet = NULL;
-
-  uint8_t flexFilterData[cReceiveFilterDataSize];
-  uint8_t flexFilterMask[cReceiveFilterMaskSize];
-
-  struct ethhdr * ethHdr = reinterpret_cast<struct ethhdr*>(flexFilterData);
-  uint16_t * vlanEthType = reinterpret_cast<uint16_t*>(flexFilterData + ETH_HLEN + 2u);
-
   mIgbDevice = IasAvbStreamHandlerEnvironment::getIgbDevice();
-  if (NULL == mIgbDevice)
+  mNetworkDriver = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+  if (NULL == mNetworkDriver)
   {
-    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "igb device is not ready",
+    DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "network driver is not ready",
                  int32_t(errno), " (", strerror(errno), ")");
   }
   else
@@ -1607,8 +1577,14 @@ IasAvbProcessingResult IasAvbReceiveEngine::startIgbReceiveEngine()
     else
     {
       // create RX packet buffers
-      mRcvPacketPool = new (nothrow) IasAvbPacketPool(*mLog);
-      if (NULL == mRcvPacketPool)
+      IasAvbNetworkDriver *netdrv = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+      if (netdrv)
+      {
+        result = netdrv->createPacketPool(*mLog, IasAvbStreamDirection::eIasAvbReceiveFromNetwork,
+                                          cReceiveBufferSize, cReceivePoolSize, &mRcvPacketPool);
+      }
+
+      if ((eIasAvbProcOK != result) || (NULL == mRcvPacketPool))
       {
         DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "failed to allocate packet pool",
             int32_t(errno), " (", strerror(errno), ")");
@@ -1616,110 +1592,10 @@ IasAvbProcessingResult IasAvbReceiveEngine::startIgbReceiveEngine()
       }
       else
       {
-        result = mRcvPacketPool->init(cReceiveBufferSize, cReceivePoolSize);
         if (eIasAvbProcOK != result)
         {
           DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "failed to initialize packet pool",
 			  int32_t(errno), " (", strerror(errno), ")");
-        }
-        else
-        {
-          while ((packet = mRcvPacketPool->getPacket()) != NULL)
-          {
-            if (igb_refresh_buffers(mIgbDevice, eRxQueue0, reinterpret_cast<igb_packet**>(&packet), 1u) != 0)
-            {
-              DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "failed to refresh RX buffer",
-                          int32_t(errno), " (", strerror(errno), ")");
-              break;
-            }
-            mPacketList.push_back(packet);
-          }
-
-          if (mPacketList.size() < cReceivePoolSize)
-          {
-            DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "unable to get packet buffer",
-                        int32_t(errno), " (", strerror(errno), ")");
-            result = eIasAvbProcNotEnoughMemory;
-          }
-          else
-          {
-            // setup the filter
-            std::memset((void*)flexFilterData, 0u, cReceiveFilterDataSize);
-            std::memset((void*)flexFilterMask, 0u, cReceiveFilterMaskSize);
-
-            // accept the IEEE1722 packets with a VLAN tag
-            ethHdr->h_proto = htons(ETH_P_8021Q);
-            *vlanEthType = htons(ETH_P_IEEE1722);
-
-            flexFilterMask[1] = 0x30; /* 00110000b = ethtype */
-            flexFilterMask[2] = 0x03; /* 00000011b = ethtype after a vlan tag */
-
-            // length must be 8 byte-aligned
-            uint32_t len = (uint32_t)sizeof(struct ethhdr) + 4u;
-            len = ((len + (8u - 1u)) / 8u) * 8u;
-
-            if (0 != igb_lock(mIgbDevice))
-            {
-              DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "IGB lock failure");
-              result = eIasAvbProcInitializationFailed;
-            }
-            else
-            {
-              // enable the filter on queue 0 with filter_id 0
-              if (igb_setup_flex_filter(mIgbDevice, eRxQueue0, eRxFilter0, len, flexFilterData, flexFilterMask) != 0)
-              {
-                DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "error enabling the flex filter",
-                            int32_t(errno), " (", strerror(errno), ")");
-                result = eIasAvbProcInitializationFailed;
-              }
-              else
-              {
-                /*
-                 * SRRCTL.Drop_En : Drop Enabled.
-                 *
-                 * If set, packets received to the queue when no descriptors are available to store them are dropped.
-                 * Default is 0b for queue 0. While AVBSH is at the stop state upon receiving the SIGSTOP signal, RX
-                 * engine can't fetch packets from queue 0. Although we separate queue 0 from another queue for the
-                 * best-effort packets, all queues share single packet buffer at the entry point of I210. Therefore if
-                 * we do not permit dropping AVTP packets assigned to queue 0, the packet buffer will eventually be
-                 * occupied by AVTP packets which interferes with the reception of the best-effort packets at the stop
-                 * state.
-                 *
-                 * Enabling this bit will secure bandwidth for the best-effort packets at the stop state but on the
-                 * other hand it may increase the threat of packet dropping of AVTP packets during normal operation.
-                 * Since SIGSTOP is a non-catchable signal, it is impossible to switch the mode on the fly. Thus we have
-                 * to decide the mode at the startup time with the cRxDiscardOverrun registry key.
-                 */
-
-                uint64_t rxDiscardOverrun = 0u;
-                (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cRxDiscardOverrun, rxDiscardOverrun);
-
-                uint32_t srrCtlReg = 0u;
-                const uint32_t cSrrCtlDropEn = 0x80000000;
-
-                (void) igb_readreg(mIgbDevice, SRRCTL(eRxQueue0), &srrCtlReg);
-
-                if (0u == rxDiscardOverrun)
-                {
-                  srrCtlReg &= ~cSrrCtlDropEn;  // disable
-                }
-                else
-                {
-                  srrCtlReg |= cSrrCtlDropEn;   // enable
-                }
-
-                (void) igb_writereg(mIgbDevice, SRRCTL(eRxQueue0), srrCtlReg);
-
-                DLT_LOG_CXX(*mLog, DLT_LOG_INFO, LOG_PREFIX, "Rx Overrun Drop:", (0u != rxDiscardOverrun) ? "on" : "off");
-                DLT_LOG_CXX(*mLog, DLT_LOG_DEBUG, LOG_PREFIX, "SRRCTL:", srrCtlReg);
-
-                /* success */
-                result = eIasAvbProcOK;
-              }
-
-              (void) igb_unlock(mIgbDevice);
-            }
-          }
         }
       }
     }
@@ -1736,35 +1612,15 @@ IasAvbProcessingResult IasAvbReceiveEngine::startIgbReceiveEngine()
 
 void IasAvbReceiveEngine::stopIgbReceiveEngine()
 {
-  IasAvbPacket* packet = NULL;
-
-  // Disable the Flex filterings
-  if (NULL != mIgbDevice)
-  {
-    (void) igb_clear_flex_filter(mIgbDevice, eRxFilter0);
-
-    /*
-     * Disable the queue before releasing the memory allocated to this
-     * queue. Also it will make sure that the filter is disabled and
-     * all received packets are routed to the normal queue.
-     */
-    (void) igb_writereg(mIgbDevice, RXDCTL(eRxQueue0), 0u);
-  }
-
-  while (!mPacketList.empty())
-  {
-    packet = mPacketList.back();
-    if (NULL != packet)
-    {
-      (void) IasAvbPacketPool::returnPacket(packet);
-    }
-    (void) mPacketList.pop_back();
-  }
-
   if (NULL != mRcvPacketPool)
   {
-    delete mRcvPacketPool;
-    mRcvPacketPool = NULL;
+    // create RX packet buffers
+    IasAvbNetworkDriver *netdrv = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+    if (netdrv)
+    {
+      netdrv->destroyPacketPool(mRcvPacketPool);
+      mRcvPacketPool = NULL;
+    }
   }
 }
 #endif /* DIRECT_RX_DMA */
@@ -1826,25 +1682,6 @@ IasAvbProcessingResult IasAvbReceiveEngine::bindMcastAddr(const IasAvbMacAddress
 
 void IasAvbReceiveEngine::emergencyShutdown()
 {
-#if defined(DIRECT_RX_DMA)
-  if (NULL != mIgbDevice)
-  {
-    if (0 == igb_lock(mIgbDevice))
-    {
-      // route all packets to the best-effort queue
-      (void) igb_clear_flex_filter(mIgbDevice, eRxFilter0);
-
-      /*
-       * Disable queue 0 so that AVTP packets remaining in the I210's packet buffer can be discarded.
-       * Otherwise pending packets might keep occupying the buffer space if the SRRCTL.Drop_En bit is 0 and
-       * interfere with the reception of the best-effort packets even after the shutdown of AVBSH.
-       */
-      (void) igb_writereg(mIgbDevice, RXDCTL(eRxQueue0), 0u);
-
-      (void) igb_unlock(mIgbDevice);
-    }
-  }
-#endif
 }
 
 

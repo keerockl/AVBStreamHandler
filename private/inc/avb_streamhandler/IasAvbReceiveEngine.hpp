@@ -29,6 +29,7 @@ class IasLocalAudioStream;
 class IasLocalVideoStream;
 class IasAvbClockDomain;
 class IasAvbStreamHandlerEventInterface;
+class IasAvbNetworkDriver;
 
 class IasAvbReceiveEngine : private IasMediaTransportAvb::IasIRunnable
 {
@@ -398,6 +399,7 @@ class IasAvbReceiveEngine : private IasMediaTransportAvb::IasIRunnable
     bool               mRecoverIgbReceiver;
 #endif /* DIRECT_RX_DMA */
     int32_t              mRcvPortIfIndex;
+    IasAvbNetworkDriver *mNetworkDriver;
 };
 
 inline void IasAvbReceiveEngine::closeSocket()

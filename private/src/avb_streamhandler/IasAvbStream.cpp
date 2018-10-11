@@ -10,8 +10,8 @@
  */
 
 #include "avb_streamhandler/IasAvbStream.hpp"
-
-#include "avb_streamhandler/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbPacketPool.hpp"
+#include "avb_networkdriver/IasAvbNetworkDriver.hpp"
 
 #include <cstring>
 #include <netinet/in.h>
@@ -44,6 +44,7 @@ IasAvbStream::IasAvbStream(DltContext &dltContext, const IasAvbStreamType stream
   , mVlanData(0u)
   , mPresentationTimeOffset(0u)
   , mPreconfigured(true)
+  , mNetworkDriver(NULL)
 {
   // yes, I know, the default ctor should have zeroed it already, but you never know.
   (void) std::memset( &mDmac, 0, cIasAvbMacAddressLength);
@@ -80,8 +81,11 @@ IasAvbStream::~IasAvbStream()
   mPresentationTimeOffset = 0u;
   mAvbClockDomain = NULL;
 
-  delete mPacketPool;
-  mPacketPool = NULL;
+  if (mNetworkDriver && mPacketPool)
+  {
+    mNetworkDriver->destroyPacketPool(mPacketPool);
+    mPacketPool = NULL;
+  }
 
   delete mAvbStreamId;
   mAvbStreamId = NULL;
@@ -197,15 +201,15 @@ IasAvbProcessingResult IasAvbStream::initTransmit(const IasAvbTSpec & tSpec, con
 
     if (eIasAvbProcOK == ret)
     {
-      mPacketPool = new (nothrow) IasAvbPacketPool(*mLog);
-
-      if (NULL == mPacketPool)
+      mNetworkDriver = IasAvbStreamHandlerEnvironment::getNetworkDriver();
+      if (mNetworkDriver)
       {
-        ret = eIasAvbProcNotEnoughMemory;
+        ret = mNetworkDriver->createPacketPool(*mLog, IasAvbStreamDirection::eIasAvbTransmitToNetwork,
+                                       tSpec.getMaxFrameSize() + IasAvbTSpec::cIasAvbPerFrameOverhead, poolSize, &mPacketPool);
       }
       else
       {
-        ret = mPacketPool->init( tSpec.getMaxFrameSize() + IasAvbTSpec::cIasAvbPerFrameOverhead, poolSize );
+        ret = eIasAvbProcInitializationFailed;
       }
     }
 

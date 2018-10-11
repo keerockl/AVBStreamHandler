@@ -15,8 +15,6 @@ add_library( ias-media_transport-avb_streamhandler SHARED
     private/src/avb_streamhandler/IasAvbClockReferenceStream.cpp
     private/src/avb_streamhandler/IasAvbHwCaptureClockDomain.cpp
     private/src/avb_streamhandler/IasAlsaClockDomain.cpp
-    private/src/avb_streamhandler/IasAvbPacket.cpp
-    private/src/avb_streamhandler/IasAvbPacketPool.cpp
     private/src/avb_streamhandler/IasAvbPtpClockDomain.cpp
     private/src/avb_streamhandler/IasAvbRawClockDomain.cpp
     private/src/avb_streamhandler/IasAvbReceiveEngine.cpp
@@ -89,3 +87,4 @@ set_target_properties( ias-media_transport-avb_streamhandler PROPERTIES VERSION 
 target_link_libraries( ias-media_transport-avb_streamhandler ias-audio-common )
 target_link_libraries( ias-media_transport-avb_streamhandler ias-media_transport-lib_ptp_daemon )
 target_link_libraries( ias-media_transport-avb_streamhandler ias-media_transport-avb_helper )
+target_link_libraries( ias-media_transport-avb_streamhandler ias-media_transport-avb_networkdriver )

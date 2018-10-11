@@ -33,6 +33,7 @@ class IasLocalAudioStream;
 class IasLocalVideoStream;
 class IasAvbClockDomain;
 class IasAvbStreamHandlerEventInterface;
+class IasAvbNetworkDriver;
 
 class IasAvbTransmitSequencer : private IasMediaTransportAvb::IasIRunnable
 {
@@ -312,7 +313,6 @@ class IasAvbTransmitSequencer : private IasMediaTransportAvb::IasIRunnable
 
     volatile uint32_t       mThreadControl;
     IasThread   *    mTransmitThread;
-    device_t         *    mIgbDevice;
     uint32_t                mQueueIndex;
     IasAvbSrClass         mClass;
     int32_t                 mRequestCount;
@@ -334,6 +334,8 @@ class IasAvbTransmitSequencer : private IasMediaTransportAvb::IasIRunnable
     bool                  mFirstRun;
     bool                  mBTMEnable;
     bool                  mStrictPktOrderEn;
+
+    IasAvbNetworkDriver  *mNetworkDriver;
 };
 
 
