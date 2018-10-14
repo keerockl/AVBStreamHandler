@@ -12,7 +12,7 @@
 #define IASAVBNETWORKDRIVER_HPP_
 
 #include "avb_streamhandler/IasAvbTypes.hpp"
-#include <dlt/dlt.h>
+#include <dlt.h>
 
 namespace IasMediaTransportAvb {
 

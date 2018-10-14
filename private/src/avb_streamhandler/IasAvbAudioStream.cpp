@@ -330,10 +330,12 @@ IasAvbProcessingResult IasAvbAudioStream::initTransmit(IasAvbSrClass srClass, ui
     {
       std::string nwIfType = "";
       (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cNwIfType, nwIfType);
+#if 0 // obsolete
       if ("socket" == nwIfType)
       {
         mVlanOffloadEnable = true;
       }
+#endif
 
       uint32_t val = 0x7FFFu; // format specific
       if (IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cAudioFloatGain, val))

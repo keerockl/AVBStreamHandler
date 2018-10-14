@@ -11,7 +11,7 @@
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
 #include <cstring>
 #include <unistd.h>
-#include <dlt/dlt_cpp_extension.hpp>
+#include <dlt_cpp_extension.hpp>
 
 namespace IasMediaTransportAvb {
 

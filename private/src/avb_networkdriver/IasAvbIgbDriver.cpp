@@ -10,7 +10,7 @@
 #include "avb_networkdriver/IasAvbIgbDriver.hpp"
 #include "avb_networkdriver/IasAvbIgbPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
-#include <dlt/dlt_cpp_extension.hpp>
+#include <dlt_cpp_extension.hpp>
 #include <cstring>
 #include <sstream>
 #include <fstream>

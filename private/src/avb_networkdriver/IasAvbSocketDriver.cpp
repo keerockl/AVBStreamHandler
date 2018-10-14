@@ -10,7 +10,7 @@
 #include "avb_networkdriver/IasAvbSocketDriver.hpp"
 #include "avb_networkdriver/IasAvbSocketPacketPool.hpp"
 #include "avb_streamhandler/IasAvbStreamHandlerEnvironment.hpp"
-#include <dlt/dlt_cpp_extension.hpp>
+#include <dlt_cpp_extension.hpp>
 #include <cstring>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
@@ -170,9 +170,13 @@ int32_t IasAvbSocketDriver::xmit(IasAvbPacket *packet, uint32_t queue_index)
     struct cmsghdr *cmsg;
     struct iovec iov;
     struct msghdr msg = {};
+#if 0
     char control[CMSG_SPACE(sizeof(uint64_t)) + CMSG_SPACE(sizeof(uint8_t))] = {};
+#else
+    char control[CMSG_SPACE(sizeof(uint64_t))] = {};
+#endif
 
-    const uint8_t drop_if_late = 1;
+    //const uint8_t drop_if_late = 1;
 
     /* non-reentrant since mutex control is not given to mDescSockAddr */
     memcpy(mDescSockAddr.sll_addr, dest_addr, ETH_ALEN);
@@ -190,7 +194,7 @@ int32_t IasAvbSocketDriver::xmit(IasAvbPacket *packet, uint32_t queue_index)
     /* Our control message is stored in the weird union value u, which has some odd size and
     alignment requirements I don't fully understand yet */
     msg.msg_control = control;
-    msg.msg_controllen = sizeof control;
+    msg.msg_controllen = sizeof(control);
 
     /* The cmsg API is full of weird unfortunate macros that are poorly documented. */
     cmsg = CMSG_FIRSTHDR(&msg); // This extracts the first cmsghdr address from the msg
@@ -199,11 +203,12 @@ int32_t IasAvbSocketDriver::xmit(IasAvbPacket *packet, uint32_t queue_index)
     cmsg->cmsg_len = CMSG_LEN(sizeof(uint64_t));
     *((__u64 *) CMSG_DATA(cmsg)) = packet->attime;
 
-    cmsg = CMSG_NXTHDR(&msg, cmsg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_DROP_IF_LATE;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(uint8_t));
-    *((__u64 *) CMSG_DATA(cmsg)) = drop_if_late;
+	//keerock
+    //cmsg = CMSG_NXTHDR(&msg, cmsg);
+    //cmsg->cmsg_level = SOL_SOCKET;
+    //cmsg->cmsg_type = SCM_DROP_IF_LATE;
+    //cmsg->cmsg_len = CMSG_LEN(sizeof(uint8_t));
+    //*((__u64 *) CMSG_DATA(cmsg)) = drop_if_late;
 
     /* Send the packet */
     errno = 0;
@@ -325,9 +330,19 @@ IasAvbProcessingResult IasAvbSocketDriver::reclaimRcvPacket(IasAvbPacket *packet
   return result;
 }
 
+
+//keerockl
+static int use_deadline_mode = 0;
+static int receive_errors = 0;
+struct sock_txtime {
+	clockid_t clockid;
+	uint16_t flags;
+}; //keerockl
+
 IasAvbProcessingResult IasAvbSocketDriver::openTransmitSocket()
 {
   IasAvbProcessingResult result = eIasAvbProcErr;
+  static struct sock_txtime sk_txtime; //keerockl
 
   if (-1 != mTransmitSocket)
   {
@@ -342,17 +357,19 @@ IasAvbProcessingResult IasAvbSocketDriver::openTransmitSocket()
     }
     else
     {
-      int on = 1;
-      if (setsockopt(mTransmitSocket, SOL_SOCKET, SO_TXTIME, &on, sizeof(on)) < 0) // to be updated
+    	sk_txtime.clockid = CLOCK_TAI;
+		sk_txtime.flags = (uint16_t)(use_deadline_mode | receive_errors);
+      //int on = 1;
+      if (setsockopt(mTransmitSocket, SOL_SOCKET, SO_TXTIME, &sk_txtime, sizeof(sk_txtime)) < 0) // to be updated
       {
-        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "socket SO_TXTIME option error", strerror(errno));
+        DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "socket SO_TXTIME option error 1", strerror(errno));
       }
       else
       {
         int priority = 3; // to be adjustable
         if (setsockopt(mTransmitSocket, SOL_SOCKET, SO_PRIORITY, &priority, sizeof(priority)) < 0)
         {
-          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "socket SO_PRIORITY option error", strerror(errno));
+          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "socket SO_PRIORITY option error 2", strerror(errno));
         }
         else
         {
@@ -360,7 +377,8 @@ IasAvbProcessingResult IasAvbSocketDriver::openTransmitSocket()
           mDescSockAddr.sll_protocol = htons(ETH_P_ALL);
 
           std::string ifname = mInterfaceName;
-          const uint64_t vlanid = 3u; // to be adjustable
+//          const uint64_t vlanid = 3u; // to be adjustable
+          const uint64_t vlanid = 0u; // to be adjustable
           if (0u != vlanid)
           {
             ifname = ifname + "." + std::to_string(vlanid);
@@ -368,6 +386,7 @@ IasAvbProcessingResult IasAvbSocketDriver::openTransmitSocket()
 
           mDescSockAddr.sll_ifindex = if_nametoindex(ifname.c_str());
           mDescSockAddr.sll_halen = ETH_ALEN;
+          DLT_LOG_CXX(*mLog, DLT_LOG_ERROR, LOG_PREFIX, "ifname:", ifname.c_str(), " ifindex:", mDescSockAddr.sll_ifindex );
           result = eIasAvbProcOK;
         }
       }

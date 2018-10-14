@@ -8,7 +8,7 @@
  */
 
 #include "avb_networkdriver/IasAvbIgbPacketPool.hpp"
-#include <dlt/dlt_cpp_extension.hpp>
+#include <dlt_cpp_extension.hpp>
 
 namespace IasMediaTransportAvb {
 

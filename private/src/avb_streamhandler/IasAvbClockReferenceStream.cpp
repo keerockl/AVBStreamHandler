@@ -173,10 +173,12 @@ IasAvbProcessingResult IasAvbClockReferenceStream::initTransmit(IasAvbSrClass sr
     {
       std::string nwIfType = "";
       (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cNwIfType, nwIfType);
+#if 0 // obsolete
       if ("socket" == nwIfType)
       {
         mVlanOffloadEnable = true;
       }
+#endif
 
       mMasterTimeout = 2000000000; // default is 2 seconds
       (void) IasAvbStreamHandlerEnvironment::getConfigValue(IasRegKeys::cAudioClockTimeout, mMasterTimeout);

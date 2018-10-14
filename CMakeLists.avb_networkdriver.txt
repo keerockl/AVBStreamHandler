@@ -15,4 +15,8 @@ add_library( ias-media_transport-avb_networkdriver STATIC
     private/src/avb_networkdriver/IasAvbSocketPacketPool.cpp
 )
 
+target_link_libraries( ias-media_transport-avb_networkdriver ${DLT_LDFLAGS} )
+target_compile_options( ias-media_transport-avb_networkdriver PUBLIC ${DLT_CFLAGS_OTHER})
+target_include_directories( ias-media_transport-avb_networkdriver PUBLIC ${DLT_INCLUDE_DIRS})
+
 target_compile_options( ias-media_transport-avb_networkdriver PUBLIC -fPIC )
