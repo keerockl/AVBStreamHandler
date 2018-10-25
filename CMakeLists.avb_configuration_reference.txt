@@ -20,3 +20,9 @@ set_target_properties(ias-media_transport-avb_configuration_reference PROPERTIES
 if (${IAS_IS_HOST_BUILD})
   target_compile_options(ias-media_transport-avb_config_base PUBLIC -DIAS_HOST_BUILD=1)
 endif()
+
+if( "x86_64" STREQUAL ${CMAKE_SYSTEM_PROCESSOR})
+    install(TARGETS ias-media_transport-avb_configuration_reference DESTINATION lib64)
+else()
+    install(TARGETS ias-media_transport-avb_configuration_reference DESTINATION lib)
+endif()

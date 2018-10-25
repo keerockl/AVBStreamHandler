@@ -89,3 +89,8 @@ set_target_properties( ias-media_transport-avb_streamhandler PROPERTIES VERSION 
 target_link_libraries( ias-media_transport-avb_streamhandler ias-audio-common )
 target_link_libraries( ias-media_transport-avb_streamhandler ias-media_transport-lib_ptp_daemon )
 target_link_libraries( ias-media_transport-avb_streamhandler ias-media_transport-avb_helper )
+if( "x86_64" STREQUAL ${CMAKE_SYSTEM_PROCESSOR})
+    install(TARGETS ias-media_transport-avb_streamhandler DESTINATION lib64)
+else()
+    install(TARGETS ias-media_transport-avb_streamhandler DESTINATION lib)
+endif()
