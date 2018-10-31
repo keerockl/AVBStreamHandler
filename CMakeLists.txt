@@ -27,8 +27,6 @@ execute_process( COMMAND make
                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/deps/gptp/linux/build
 )
 
-
-
 # set release version for avb stream handler
 set( MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MAJOR    0 )
 set( MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MINOR    0 )
@@ -104,20 +102,32 @@ if (${IAS_IS_HOST_BUILD})
 endif()
 
 #------------------------------------------------------------------
+#Install
+#------------------------------------------------------------------
+
+install(CODE "execute_process(COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/deps/gptp/linux/build/obj/daemon_cl ${CMAKE_INSTALL_PREFIX}/bin/daemon_cl)")
+install(CODE "execute_process(COMMAND mkdir -p /etc/alsa/conf.d)")
+
+install(CODE "execute_process(COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/public/res/51-smartx.conf ${CMAKE_CURRENT_SOURCE_DIR}/public/res/51-smartx.conf.tmp)")
+install(CODE "execute_process(COMMAND sed -i s@<lib_path>@${CMAKE_INSTALL_LIBDIR}@g ${CMAKE_CURRENT_SOURCE_DIR}/public/res/51-smartx.conf.tmp)")
+install(CODE "execute_process(COMMAND mv ${CMAKE_CURRENT_SOURCE_DIR}/public/res/51-smartx.conf.tmp /etc/alsa/conf.d/51-smartx.conf)")
+
+
+#------------------------------------------------------------------
 # create documentation for the whole stream handler here, referencing all relevant entities
 #------------------------------------------------------------------
-include(doxygen/ias_defines_doxygen.cmake)
+#include(doxygen/ias_defines_doxygen.cmake)
 
 #TODO Vince add doxygen for watchdog
-IasCreateComponentDocumentation( media_transport avb_streamhandler ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MAJOR}
-                                                                   ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MINOR}
-                                                                   ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_REVISION}
-  avb_configuration_reference
-  avb_clockdriver
-  avb_streamhandler
-  avb_streamhandler_api
-)
-IasCreateDoxygenTarget()
+#IasCreateComponentDocumentation( media_transport avb_streamhandler ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MAJOR}
+#                                                                   ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MINOR}
+#                                                                   ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_REVISION}
+#  avb_configuration_reference
+#  avb_clockdriver
+#  avb_streamhandler
+#  avb_streamhandler_api
+#)
+#IasCreateDoxygenTarget()
 #------------------------------------------------------------------
 #IasCreateBbRecipeFile( media_transport ias-mediatransport-avbstreamhandler ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MAJOR}
 #                                                                            ${MEDIA_TRANSPORT_AVB_STREAMHANDLER_VERSION_MINOR}
