@@ -72,6 +72,12 @@ if (${PERFORMANCE_MEASUREMENT})
     target_compile_options( ias-media_transport-avb_streamhandler PUBLIC -DPERFORMANCE_MEASUREMENT=1 )
 endif()
 
+
+target_link_libraries( ias-media_transport-avb_streamhandler ${AUDIOCOMMON_LDFLAGS} )
+target_compile_options( ias-media_transport-avb_streamhandler PUBLIC ${AUDIOCOMMON_CFLAGS_OTHER})
+target_include_directories( ias-media_transport-avb_streamhandler PUBLIC ${AUDIOCOMMON_INCLUDE_DIRS})
+
+
 target_link_libraries( ias-media_transport-avb_streamhandler ${DLT_LDFLAGS} )
 target_compile_options( ias-media_transport-avb_streamhandler PUBLIC ${DLT_CFLAGS_OTHER})
 target_include_directories( ias-media_transport-avb_streamhandler PUBLIC ${DLT_INCLUDE_DIRS})

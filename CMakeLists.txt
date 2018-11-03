@@ -12,8 +12,9 @@ pkg_check_modules(ASOUND REQUIRED alsa)
 pkg_check_modules(SNDFILE REQUIRED sndfile)
 pkg_check_modules(DLT REQUIRED automotive-dlt)
 pkg_check_modules(DLT REQUIRED automotive-dlt-c++)
+pkg_check_modules(AUDIOCOMMON REQUIRED AudioCommon )
 
-add_subdirectory( deps/audio/common )
+#add_subdirectory( deps/audio/common )
 
 # build igb_avb and gptp libraries and driver before searching for libraries
 execute_process( COMMAND make lib CFLAGS=-fPIC
@@ -60,7 +61,7 @@ set( IAS_PREPRODUCTION_SW 1 CACHE STRING "pre-production mode switch")
 #set( PERFORMANCE_MEASUREMENT 1 CACHE STRING "performance measurement features switch")
 
 # use compiler flags being using in GP1.x:
-SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -pipe -g -fstack-protector-all -pie -fpie -D_FORTIFY_SOURCE=2 -fvisibility-inlines-hidden -DNDEBUG -fexceptions -fstrict-aliasing -Wall -Wextra -Wformat -Wformat-security -Wconversion -Werror -fasynchronous-unwind-tables -fno-omit-frame-pointer -std=c++11" )
+SET( CMAKE_CXX_FLAGS " -O2 -pipe -g -fstack-protector-all -pie -fpie -D_FORTIFY_SOURCE=2 -fvisibility-inlines-hidden -DNDEBUG -fexceptions -fstrict-aliasing -Wall -Wextra -Wformat -Wformat-security -Wconversion -Werror -fasynchronous-unwind-tables -fno-omit-frame-pointer -std=c++11" )
 
 if (${IAS_IS_HOST_BUILD})
   #disable position-independent executable (PIE) as gtest does not handle it correctly

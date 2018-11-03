@@ -20,7 +20,13 @@ add_library( ias-media_transport-avb_video_bridge STATIC
 
 target_link_libraries( ias-media_transport-avb_video_bridge ias-media_transport-avb_helper )
 target_link_libraries( ias-media_transport-avb_video_bridge ias-audio-common )
-target_link_libraries( ias-media_transport-avb_video_bridge dlt )
+#target_link_libraries( ias-media_transport-avb_video_bridge dlt )
+
+target_link_libraries( ias-media_transport-avb_video_bridge ${AUDIOCOMMON_LDFLAGS} )
+target_compile_options( ias-media_transport-avb_video_bridge PUBLIC ${AUDIOCOMMON_CFLAGS_OTHER})
+target_include_directories( ias-media_transport-avb_video_bridge PUBLIC ${AUDIOCOMMON_INCLUDE_DIRS})
+
+
 
 if (${IAS_IS_HOST_BUILD})
   target_compile_options(ias-media_transport-avb_video_bridge PUBLIC -DIAS_HOST_BUILD=1)
