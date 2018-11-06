@@ -1,5 +1,5 @@
 add_executable( test_IasTestAvbStreamhandler
-                private/tst/avb_streamhandler/src/IasTestAlsaEngine.cpp
+		private/tst/avb_streamhandler/src/IasTestAlsaEngine.cpp
                 private/tst/avb_streamhandler/src/IasTestAlsaStream.cpp
                 private/tst/avb_streamhandler/src/IasTestAlsaWorkerThread.cpp
                 private/tst/avb_streamhandler/src/IasTestAvbAudioShmProvider.cpp
@@ -63,7 +63,7 @@ target_link_libraries( test_IasTestAvbStreamhandler boost_iostreams )
 
 ###  IasUseEntity( media_transport lib_ptp_daemon )
 find_library( IGB_LIB "libigb.a" PATHS "${CMAKE_CURRENT_SOURCE_DIR}/deps/OpenAvb/lib/igb")
-find_library( GTEST_LIBRARY "libgtest.a" PATHS "/usr/lib/" )
+find_library( GTEST_LIBRARY "libgtest.a" PATHS ${CMAKE_INSTALL_LIBDIR} )
 
 ###  IasUseEntity( core_libraries test_wrapper )
 ###  IasUseEntity( media_transport test_wrapper )
@@ -92,6 +92,9 @@ enable_testing()
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
+
+target_link_libraries( test_IasTestAvbStreamhandler tbb )
+
 target_link_libraries( test_IasTestAvbStreamhandler ${GTEST_LIBRARY} )
 target_link_libraries( test_IasTestAvbStreamhandler ias-media_transport-test_common )
 target_link_libraries( test_IasTestAvbStreamhandler ias-audio-common )
@@ -99,7 +102,6 @@ target_link_libraries( test_IasTestAvbStreamhandler pthread )
 target_link_libraries( test_IasTestAvbStreamhandler ias-media_transport-avb_config_base )
 target_link_libraries( test_IasTestAvbStreamhandler ias-media_transport-avb_clockdriver )
 target_link_libraries( test_IasTestAvbStreamhandler stdc++fs )
-#target_link_libraries( test_IasTestAvbStreamhandler test_wrapper )
 
 # set capabilities
 add_custom_command(TARGET test_IasTestAvbStreamhandler POST_BUILD
